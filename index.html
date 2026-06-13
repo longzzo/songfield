@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>멀티 카드 결투</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Noto+Serif+KR:wght@500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="theme.css" />
+</head>
+<body>
+  <template id="__bundler_thumbnail">
+    <svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
+      <rect width="240" height="240" fill="#141823" />
+      <g transform="translate(120 120)">
+        <circle r="58" fill="none" stroke="#8a6f33" stroke-width="2" />
+        <text x="0" y="20" text-anchor="middle" font-size="62" fill="#e2c277" font-family="serif">⚔</text>
+      </g>
+    </svg>
+  </template>
+
+  <div id="root"></div>
+
+  <!-- PartyKit 호스트 설정 (Phase 1) -->
+  <script>
+    // 로컬 개발(127.0.0.1/localhost)에서는 `partykit dev` 서버(:1999)에 붙고,
+    // 그 외(GitHub Pages 등)에서는 배포된 PartyKit 호스트에 붙는다.
+    window.PARTYKIT_HOST =
+      (location.hostname === "127.0.0.1" || location.hostname === "localhost")
+        ? "127.0.0.1:1999"
+        : "card-duel.YOUR-PARTYKIT-USERNAME.partykit.dev"; // TODO: `npx partykit deploy` 후 실제 호스트로 교체
+  </script>
+  <script type="module">
+    import { PartySocket } from "https://esm.sh/partysocket@1.0.2";
+    window.PartySocket = PartySocket;
+    window.dispatchEvent(new Event("partysocket-ready"));
+  </script>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script src="engine.js"></script>
+  <script type="text/babel" data-presets="react" src="components.jsx"></script>
+  <script type="text/babel" data-presets="react" src="modals.jsx"></script>
+  <script type="text/babel" data-presets="react" src="screens.jsx"></script>
+  <script type="text/babel" data-presets="react" src="app.jsx"></script>
+</body>
+</html>

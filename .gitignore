@@ -1,0 +1,7 @@
+node_modules/
+.partykit/
+*.log
+.DS_Store
+
+# 14MB 단일파일 번들 — Pages/리포에서 제외
+멀티 카드 결투 (단일파일).html
