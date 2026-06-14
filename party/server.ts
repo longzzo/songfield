@@ -17,6 +17,17 @@ import {
   type Connection,
   type ConnectionContext,
 } from "partyserver";
+// 브라우저와 공용인 게임 엔진(CommonJS). 서버에서 직접 인스턴스화해 전투를 권위적으로 진행.
+import { GameEngine } from "../engine.js";
+
+const ACTION_WHITELIST = new Set([
+  "playCard", "selectTarget", "cancelTarget", "useImprint", "releaseImprint",
+  "pray", "startOffer", "cancelOffer", "skipTurn",
+  "chooseDefense", "forgive", "submitChoice", "submitForcedSale", "submitReplace",
+  "submitRedistribute", "cancelRedistribute",
+]);
+const TURN_TIMEOUT_MS = 35000;        // 온라인 사람의 행동 제한
+const OFFLINE_TIMEOUT_MS = 1500;      // 끊긴 좌석은 빨리 자동 처리
 
 const AI_TYPES = [
   "aggressive", "defensive", "alchemist", "trader", "mage",
@@ -76,6 +87,12 @@ export class CardDuel extends Server<Env> {
   chatSeq = 1;
   botSeq = 0;
   botTimers = new Set<ReturnType<typeof setTimeout>>();
+
+  // ----- 서버 권위 전투 -----
+  engine: any = null;
+  unsub: (() => void) | null = null;
+  actionTimer: ReturnType<typeof setTimeout> | null = null;
+  timerToken = 0;
 
   /* ---------- helpers ---------- */
   roster(): Player[] {
@@ -146,6 +163,79 @@ export class CardDuel extends Server<Env> {
   }
   clearBotTimers() { this.botTimers.forEach((t) => clearTimeout(t)); this.botTimers.clear(); }
 
+  /* ---------- 서버 권위 전투 ---------- */
+  isInGameSeat(id: string) { return this.humans.has(id); } // 사람 좌석 id == 연결 id == 참가자 id
+
+  startGame() {
+    this.stopGame();
+    const roster = this.roster().map((p) => ({ id: p.id, nickname: p.nickname, isBot: p.isBot, aiType: p.aiType }));
+    this.engine = new GameEngine();
+    this.unsub = this.engine.subscribe(() => this.onEngineEmit());
+    this.engine.newGame(roster); // 내부 emit() → onEngineEmit 으로 초기 상태 브로드캐스트
+  }
+  stopGame() {
+    if (this.unsub) { this.unsub(); this.unsub = null; }
+    this.clearActionTimeout();
+    this.engine = null;
+  }
+  onEngineEmit() {
+    if (!this.engine) return;
+    this.broadcastState();
+    this.scheduleActionTimeout();
+  }
+
+  // 손패 등 비공개 정보를 관전자/상대에게 가린 뷰를 좌석별로 전송.
+  redactState(st: any, viewerId: string) {
+    const participants = st.participants.map((p: any) =>
+      p.id === viewerId ? p : { ...p, hand: p.hand.map(() => ({ hidden: true })) });
+    let pendingRequest = st.pendingRequest;
+    if (pendingRequest && pendingRequest.ownerId !== viewerId) {
+      pendingRequest = { kind: pendingRequest.kind, ownerId: pendingRequest.ownerId };
+    }
+    return { ...st, participants, pendingRequest };
+  }
+  broadcastState() {
+    const st = this.engine.state;
+    const ranking = st.gameOver
+      ? this.engine.finalRanking().map((r: any) => ({ rank: r.rank, id: r.participant ? r.participant.id : null }))
+      : null;
+    for (const conn of this.getConnections()) {
+      conn.send(JSON.stringify({ type: "sync", state: this.redactState(st, conn.id), ranking }));
+    }
+  }
+
+  // 현재 행동/응답해야 하는 사람 좌석 id (없으면 null).
+  activeHumanSeat(): string | null {
+    const st = this.engine?.state;
+    if (!st || st.gameOver) return null;
+    if (st.pendingRequest && this.isInGameSeat(st.pendingRequest.ownerId)) return st.pendingRequest.ownerId;
+    if (st.phase === "playerAction" && this.isInGameSeat(st.currentActorId)) return st.currentActorId;
+    return null;
+  }
+  clearActionTimeout() { if (this.actionTimer) { clearTimeout(this.actionTimer); this.actionTimer = null; } }
+  scheduleActionTimeout() {
+    this.clearActionTimeout();
+    const activeId = this.activeHumanSeat();
+    if (!activeId) return;
+    const online = this.humans.get(activeId)?.isOnline !== false;
+    const token = ++this.timerToken;
+    this.actionTimer = setTimeout(() => this.autoResolve(activeId, token), online ? TURN_TIMEOUT_MS : OFFLINE_TIMEOUT_MS);
+  }
+  autoResolve(activeId: string, token: number) {
+    if (token !== this.timerToken || !this.engine) return;
+    const st = this.engine.state;
+    const req = st.pendingRequest;
+    if (req && req.ownerId === activeId) {
+      if (req.kind === "defense") this.engine.forgive(activeId);
+      else if (req.kind === "choice") this.engine.submitChoice(activeId, req.choices[0].instanceId);
+      else if (req.kind === "forcedSale") this.engine.submitForcedSale(activeId, req.candidates[0].instanceId);
+      else if (req.kind === "replace") this.engine.submitReplace(activeId, req.candidates[0].instanceId);
+      else if (req.kind === "redistribute") this.engine.cancelRedistribute(activeId);
+    } else if (st.phase === "playerAction" && st.currentActorId === activeId) {
+      this.engine.playerTimeout(activeId);
+    }
+  }
+
   /* ---------- 연결 수명주기 ---------- */
   onConnect(connection: Connection, _ctx: ConnectionContext) {
     // 이미 진행 중인 방이라면 관전/대기. nickname 은 join 메시지로 확정.
@@ -166,6 +256,15 @@ export class CardDuel extends Server<Env> {
     // 신규 접속자에게 현재 채팅 히스토리 전달
     connection.send(JSON.stringify({ type: "history", chat: this.chat, selfId: connection.id }));
     this.broadcastRoom();
+    // 진행 중인 방이면 현재 전투 상태를 바로 전달(관전 시작).
+    if (this.status === "playing" && this.engine) {
+      const st = this.engine.state;
+      const ranking = st.gameOver
+        ? this.engine.finalRanking().map((r: any) => ({ rank: r.rank, id: r.participant ? r.participant.id : null }))
+        : null;
+      connection.send(JSON.stringify({ type: "start", hostId: this.hostId }));
+      connection.send(JSON.stringify({ type: "sync", state: this.redactState(st, connection.id), ranking }));
+    }
   }
 
   onMessage(sender: Connection, message: string | ArrayBuffer) {
@@ -241,15 +340,25 @@ export class CardDuel extends Server<Env> {
         if (!everyoneReady || this.roster().length < START_MIN) break;
         this.clearBotTimers();
         this.status = "playing";
-        // Phase 1: 전투는 각 클라이언트 로컬 엔진에서 동일 roster 로 진행한다.
-        const roster = this.roster().map((p) => ({ id: p.id, nickname: p.nickname, isBot: p.isBot, aiType: p.aiType }));
+        // 서버가 엔진을 권위적으로 구동. 클라는 "start" 로 화면 전환 후 "sync" 상태를 받아 렌더.
         this.pushChat({ sys: true, text: "결투가 시작되었습니다. 행운을 빕니다." });
-        this.broadcast(JSON.stringify({ type: "start", roster, hostId: this.hostId }));
+        this.broadcast(JSON.stringify({ type: "start", hostId: this.hostId }));
         this.broadcastRoom();
+        this.startGame();
+        break;
+      }
+      case "action": {
+        if (this.status !== "playing" || !this.engine) break;
+        if (!this.isInGameSeat(sender.id)) break; // 관전자/비참가자 입력 무시
+        const action = String(msg.action || "");
+        if (!ACTION_WHITELIST.has(action)) break;
+        const args = Array.isArray(msg.args) ? msg.args : [];
+        try { this.engine[action](sender.id, ...args); } catch { /* 엔진 내부 검증으로 무시 */ }
         break;
       }
       case "backToRoom": {
         if (me.id !== this.hostId) break;
+        this.stopGame();
         this.status = "lobby";
         this.roster().forEach((p) => { p.isReady = false; p.isOnline = true; });
         this.bots.forEach((b, i) => this.scheduleBotReady(b, i));
@@ -270,6 +379,8 @@ export class CardDuel extends Server<Env> {
     if (this.status === "playing") {
       // 진행 중: 좌석 유지, 오프라인 표시 (DisconnectBanner 구동)
       me.isOnline = false;
+      // 끊긴 좌석이 지금 행동/응답 차례면 짧은 타임아웃으로 자동 처리해 게임이 멈추지 않게.
+      if (this.engine) this.scheduleActionTimeout();
     } else {
       // 로비: 좌석 제거
       this.humans.delete(id);
