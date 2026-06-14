@@ -178,10 +178,11 @@ class GameEngine {
   emit() { this.listeners.forEach((fn) => fn()); }
 
   /* ----- accessors ----- */
-  player() { return this.state.participants[0]; }
   getParticipant(id) { return this.state?.participants.find((p) => p.id === id) || null; }
   livingParticipants() { return this.state.participants.filter((p) => p.alive); }
-  isPlayerTurn() { return this.state.phase === "playerAction" && this.state.currentActorId === this.player().id && !this.state.gameOver; }
+  // 서버 권위형: 특정 좌석(actorId)이 지금 행동할 차례인지. (예전 isPlayerTurn 대체)
+  isActorTurn(actorId) { return this.state.phase === "playerAction" && this.state.currentActorId === actorId && !this.state.gameOver; }
+  isHuman(p) { return p && p.type !== "ai"; }
   isCardSealed(card) { return card.sealedTurns > 0; }
   canPay(actor, cost) { return actor.hp > cost.hp && actor.mp >= cost.mp && actor.gp >= cost.gp; }
 
@@ -201,9 +202,11 @@ class GameEngine {
 
     const participants = [];
     roster.forEach((r, i) => {
-      const type = i === 0 ? "player" : "ai";
-      const aiType = i === 0 ? "human" : (r.aiType || AI_TYPES[(i - 1) % AI_TYPES.length]);
-      const p = this.createParticipant(r.id || (i === 0 ? "p0" : `ai${i}`), r.nickname, type, aiType);
+      // 서버 권위형: 봇만 "ai", 사람은 모두 "human"(상호작용 좌석).
+      const isBot = !!r.isBot;
+      const type = isBot ? "ai" : "human";
+      const aiType = isBot ? (r.aiType || AI_TYPES[i % AI_TYPES.length]) : "human";
+      const p = this.createParticipant(r.id || `p${i}`, r.nickname, type, aiType);
       participants.push(p);
     });
 
@@ -211,8 +214,8 @@ class GameEngine {
     this.state = {
       gameId, participants, order, orderIndex: 0, round: 1, phase: "init",
       currentActorId: null, pendingAction: null, pendingRequest: null,
-      gameOver: false, winnerId: null, playerEliminated: false,
-      eliminationOrder: [], logs: [], logSeq: 1, aiDelay: 650,
+      gameOver: false, winnerId: null,
+      eliminationOrder: [], logs: [], logSeq: 1, aiDelay: 650, turnGap: 200,
     };
     this.pendingDefense = null;
 
@@ -269,10 +272,12 @@ class GameEngine {
     if (expectedGameId !== null && this.state.gameId !== expectedGameId) return;
     const actor = this.getParticipant(this.state.order[this.state.orderIndex]);
     if (!actor) return;
-    this.state.currentActorId = actor.id;
+    // 죽은 좌석은 currentActorId 를 찍지 않고 건너뛴다(과도 상태에서 죽은 좌석이
+    // 행동 가능한 좌석으로 보이는 것을 방지).
     if (!actor.alive) { this.advanceTurn(); return; }
+    this.state.currentActorId = actor.id;
 
-    this.state.phase = actor.type === "player" ? "playerAction" : "aiActing";
+    this.state.phase = actor.type === "ai" ? "aiActing" : "playerAction";
     this.state.turnStartedAt = Date.now();
     this.applyStartTurnEffects(actor);
     this.checkDeaths();
@@ -284,7 +289,7 @@ class GameEngine {
     if (actor.type === "ai") {
       const scheduledGameId = this.state.gameId;
       const actorId = actor.id;
-      window.setTimeout(() => {
+      setTimeout(() => {
         if (!this.state || this.state.gameId !== scheduledGameId || this.state.gameOver) return;
         const liveActor = this.getParticipant(actorId);
         if (!liveActor || this.state.currentActorId !== actorId || this.state.phase !== "aiActing") return;
@@ -305,6 +310,8 @@ class GameEngine {
 
   advanceTurn() {
     if (!this.state || this.state.gameOver) return;
+    // 턴 전환 공백: 다음 좌석이 시작되기 전까지는 누구의 행동 차례도 아님.
+    this.state.phase = "between";
     this.state.orderIndex += 1;
     if (this.state.orderIndex >= this.state.order.length) {
       this.state.orderIndex = 0;
@@ -314,7 +321,7 @@ class GameEngine {
     }
     this.emit();
     const scheduledGameId = this.state.gameId;
-    window.setTimeout(() => this.beginTurn(scheduledGameId), 200);
+    setTimeout(() => this.beginTurn(scheduledGameId), this.state.turnGap);
   }
 
   finishMainAction(actor) {
@@ -334,9 +341,9 @@ class GameEngine {
     if (card.timing !== "active") { this.log(`${card.name}은 대응 시점에만 사용할 수 있습니다.`, "system"); this.emit(); return; }
     if (!this.canPay(actor, card.cost)) { this.log(`${actor.name}: ${card.name} 비용이 부족합니다.`, "system"); this.emit(); return; }
 
-    if (card.effect === "redistribute_resources" && actor.type === "player") { this.openRedistributeModal(actor, card); return; }
-    if (card.effect === "sell_own_card_to_target_by_price" && actor.type === "player" && !options.sellInstanceId) { this.openForcedSaleModal(actor, card, targetId); return; }
-    if (card.effect === "replace_one_card_self" && actor.type === "player" && !options.replaceInstanceId) { this.openReplaceCardModal(actor, card); return; }
+    if (card.effect === "redistribute_resources" && this.isHuman(actor)) { this.openRedistributeModal(actor, card); return; }
+    if (card.effect === "sell_own_card_to_target_by_price" && this.isHuman(actor) && !options.sellInstanceId) { this.openForcedSaleModal(actor, card, targetId); return; }
+    if (card.effect === "replace_one_card_self" && this.isHuman(actor) && !options.replaceInstanceId) { this.openReplaceCardModal(actor, card); return; }
 
     const target = targetId ? this.getParticipant(targetId) : actor;
     const afterEffect = () => {
@@ -363,7 +370,7 @@ class GameEngine {
     if (!attacker.alive || !defender || !defender.alive) { options.onComplete?.(); return; }
     const damage = this.computeAttackPower(attacker, defender, card, Boolean(options.isMagic));
     const attackData = { attacker, defender, card, baseDamage: Math.max(0, damage), isMagic: Boolean(options.isMagic), onComplete: options.onComplete };
-    if (defender.type === "player") { this.openDefenseModal(attackData); return; }
+    if (this.isHuman(defender)) { this.openDefenseModal(attackData); return; }
     const defenseCard = this.chooseAIDefense(defender, card, damage);
     this.resolveDefense(attackData, defenseCard, false);
   }
@@ -615,14 +622,14 @@ class GameEngine {
 
   drawChoice(actor, done) {
     const choices = [this.drawVirtualCard(actor), this.drawVirtualCard(actor)];
-    if (actor.type !== "player") {
+    if (actor.type === "ai") {
       const picked = choices.sort((a, b) => b.price - a.price)[0];
       if (actor.hand.length < STAT.maxHand) actor.hand.push(picked);
       this.log(`${actor.name}이 묵상으로 ${picked.name}을 선택했습니다.`);
       done(); return;
     }
     this._choiceCtx = { actor, choices, done };
-    this.state.pendingRequest = { kind: "choice", title: "묵상", description: "획득할 카드 1장을 선택하세요.", choices };
+    this.state.pendingRequest = { kind: "choice", ownerId: actor.id, title: "묵상", description: "획득할 카드 1장을 선택하세요.", choices };
     this.emit();
   }
   submitChoice(instanceId) {
@@ -719,7 +726,7 @@ class GameEngine {
   performPrayer(actor) {
     if (actor.hand.some((c) => c.category === "weapon")) { this.log(`${actor.name}은 손패에 무기가 있어 기도할 수 없습니다.`); this.emit(); return; }
     this.recordSpecialPath(actor, "pray");
-    if (actor.primaryPath === "holy" && actor.type === "player") { this.drawChoice(actor, () => this.finishMainAction(actor)); return; }
+    if (actor.primaryPath === "holy" && this.isHuman(actor)) { this.drawChoice(actor, () => this.finishMainAction(actor)); return; }
     this.drawCard(actor);
     if (actor.primaryPath === "holy") this.drawCard(actor);
     this.log(`${actor.name}이 기도했습니다.`);
@@ -731,7 +738,7 @@ class GameEngine {
     this.removeCardFromHand(actor, card.instanceId);
     this.recordSpecialPath(actor, "offer");
     this.log(`${actor.name}이 ${card.name}을 바쳤습니다.`);
-    if (actor.primaryPath === "holy" && actor.type === "player") { this.drawChoice(actor, () => this.finishMainAction(actor)); return; }
+    if (actor.primaryPath === "holy" && this.isHuman(actor)) { this.drawChoice(actor, () => this.finishMainAction(actor)); return; }
     this.drawCard(actor);
     if (actor.primaryPath === "holy") this.drawCard(actor);
     this.finishMainAction(actor);
@@ -763,75 +770,79 @@ class GameEngine {
   }
 
   /* =========================================================
-    플레이어 입력 (React 가 호출)
+    플레이어 입력 (서버가 actorId 와 함께 호출 — 좌석 검증 포함)
   ========================================================= */
-  playCard(instanceId) {
-    const p = this.player(); const card = p.hand.find((c) => c.instanceId === instanceId);
-    if (!card || this.state.gameOver) return;
-    if (this.state.phase === "sacrifice") { this.state.phase = "playerAction"; this.performOffering(p, instanceId); return; }
-    if (!this.isPlayerTurn()) return;
+  playCard(actorId, instanceId) {
+    const p = this.getParticipant(actorId); if (!p || this.state.gameOver) return;
+    const card = p.hand.find((c) => c.instanceId === instanceId);
+    if (!card) return;
+    // 바치기(sacrifice)는 현재 행동 중인 본인만.
+    if (this.state.phase === "sacrifice" && this.state.currentActorId === actorId) { this.state.phase = "playerAction"; this.performOffering(p, instanceId); return; }
+    if (!this.isActorTurn(actorId)) return;
     if (this.isCardSealed(card)) { this.log(`${card.name}은 봉인되어 사용할 수 없습니다.`); this.emit(); return; }
     if (card.timing !== "active") { this.log(`${card.name}은 공격 대응 시점에만 사용할 수 있습니다.`); this.emit(); return; }
     if (!this.canPay(p, card.cost)) { this.log(`${card.name} 비용이 부족합니다.`); this.emit(); return; }
     if (card.targetType === "enemy") { this.state.pendingAction = { kind: "card", actorId: p.id, cardInstanceId: card.instanceId }; this.state.phase = "selectTarget"; this.emit(); return; }
     this.useCard(p, card, p.id);
   }
-  selectTarget(targetId) {
+  selectTarget(actorId, targetId) {
     if (this.state.phase !== "selectTarget" || !this.state.pendingAction) return;
+    if (this.state.pendingAction.actorId !== actorId) return;
     const target = this.getParticipant(targetId);
     if (!target || !target.alive) return;
-    const p = this.player(); const pending = this.state.pendingAction;
+    const p = this.getParticipant(actorId); if (!p) return;
+    const pending = this.state.pendingAction;
     this.state.pendingAction = null; this.state.phase = "playerAction";
     if (pending.kind === "card") { const card = p.hand.find((c) => c.instanceId === pending.cardInstanceId); if (!card) return this.emit(); this.useCard(p, card, targetId); }
     if (pending.kind === "imprint") { const imprint = p.imprints.find((c) => c.id === pending.cardId); if (!imprint) return this.emit(); this.useCard(p, imprint, targetId, { fromImprint: true }); }
   }
-  cancelTarget() { if (this.state.phase === "selectTarget") { this.state.pendingAction = null; this.state.phase = "playerAction"; this.emit(); } }
-  useImprint(cardId) {
-    const p = this.player(); if (!this.isPlayerTurn()) return;
+  cancelTarget(actorId) { if (this.state.phase === "selectTarget" && this.state.pendingAction?.actorId === actorId) { this.state.pendingAction = null; this.state.phase = "playerAction"; this.emit(); } }
+  useImprint(actorId, cardId) {
+    const p = this.getParticipant(actorId); if (!p || !this.isActorTurn(actorId)) return;
     const card = p.imprints.find((c) => c.id === cardId); if (!card) return;
     if (!this.canPay(p, card.cost)) { this.log(`${card.name} 재사용 비용이 부족합니다.`); this.emit(); return; }
     if (card.targetType === "enemy") { this.state.pendingAction = { kind: "imprint", actorId: p.id, cardId: card.id }; this.state.phase = "selectTarget"; this.emit(); return; }
     this.useCard(p, card, p.id, { fromImprint: true });
   }
-  releaseImprint(cardId) {
-    const p = this.player(); if (!this.isPlayerTurn()) return;
+  releaseImprint(actorId, cardId) {
+    const p = this.getParticipant(actorId); if (!p || !this.isActorTurn(actorId)) return;
     const before = p.imprints.length; p.imprints = p.imprints.filter((c) => c.id !== cardId);
     if (p.imprints.length < before) this.log(`${p.name}이 마법 각인을 해제했습니다.`);
     this.emit();
   }
-  pray() { if (this.isPlayerTurn()) this.performPrayer(this.player()); }
-  startOffer() { if (!this.isPlayerTurn()) return; this.state.phase = "sacrifice"; this.log("바칠 카드를 손패에서 선택하세요."); this.emit(); }
-  cancelOffer() { if (this.state.phase === "sacrifice") { this.state.phase = "playerAction"; this.emit(); } }
-  skipTurn() { if (this.isPlayerTurn()) { this.log(`${this.player().name}이 턴을 넘겼습니다.`, "system"); this.endTurn(this.player()); } }
-  playerTimeout() {
-    if (!this.isPlayerTurn()) return;
-    const p = this.player();
+  pray(actorId) { if (this.isActorTurn(actorId)) this.performPrayer(this.getParticipant(actorId)); }
+  startOffer(actorId) { if (!this.isActorTurn(actorId)) return; this.state.phase = "sacrifice"; this.log("바칠 카드를 손패에서 선택하세요."); this.emit(); }
+  cancelOffer(actorId) { if (this.state.phase === "sacrifice" && this.state.currentActorId === actorId) { this.state.phase = "playerAction"; this.emit(); } }
+  skipTurn(actorId) { if (this.isActorTurn(actorId)) { const p = this.getParticipant(actorId); this.log(`${p.name}이 턴을 넘겼습니다.`, "system"); this.endTurn(p); } }
+  playerTimeout(actorId) {
+    if (!this.isActorTurn(actorId)) return;
+    const p = this.getParticipant(actorId);
     if (!p.hand.some((c) => c.category === "weapon")) { this.log(`시간 초과: ${p.name}이 자동으로 기도합니다.`, "system"); this.performPrayer(p); }
     else { this.log(`시간 초과: ${p.name}의 턴이 자동으로 넘어갑니다.`, "system"); this.endTurn(p); }
   }
 
-  /* ----- 모달 트리거 ----- */
+  /* ----- 모달 트리거 (pendingRequest.ownerId 로 대상 클라만 표시) ----- */
   openDefenseModal(attackData) {
     const defender = attackData.defender;
     const defenseCards = defender.hand.filter((c) => c.timing === "defense" && !this.isCardSealed(c));
     this.state.phase = "defense";
     this.pendingDefense = attackData;
     this.state.pendingRequest = {
-      kind: "defense",
+      kind: "defense", ownerId: defender.id,
       attackerName: attackData.attacker.name, cardName: attackData.card.name, baseDamage: attackData.baseDamage,
       defenseCards: defenseCards.map((c) => ({ ...c, _guardValue: isProtectionScript(c) ? "최종 피해 -3" : `방어 ${this.computeGuard(defender, c, attackData.card)}` })),
       hasDefense: defenseCards.length > 0,
     };
     this.emit();
   }
-  chooseDefense(instanceId) {
-    const pending = this.pendingDefense; if (!pending) return;
+  chooseDefense(actorId, instanceId) {
+    const pending = this.pendingDefense; if (!pending || pending.defender.id !== actorId) return;
     const card = pending.defender.hand.find((c) => c.instanceId === instanceId); if (!card) return;
     this.pendingDefense = null;
     this.resolveDefense(pending, card, false);
   }
-  forgive() {
-    const pending = this.pendingDefense; if (!pending) return;
+  forgive(actorId) {
+    const pending = this.pendingDefense; if (!pending || pending.defender.id !== actorId) return;
     const had = pending.defender.hand.some((c) => c.timing === "defense" && !this.isCardSealed(c));
     this.pendingDefense = null;
     this.resolveDefense(pending, null, had);
@@ -844,13 +855,13 @@ class GameEngine {
     if (candidates.length === 0) { this.log("강매 실패: 판매할 수 있는 카드가 없습니다.", "trade"); this.emit(); return; }
     this._saleCtx = { actor, sourceCard, targetId };
     this.state.pendingRequest = {
-      kind: "forcedSale", targetName: target.name,
+      kind: "forcedSale", ownerId: actor.id, targetName: target.name,
       candidates: candidates.map((c) => ({ ...c, _saleValue: `판매가 ${actor.primaryPath === "trade" ? Math.min(8, c.price + 1) : c.price} GP` })),
     };
     this.emit();
   }
-  submitForcedSale(sellInstanceId) {
-    const ctx = this._saleCtx; if (!ctx) return;
+  submitForcedSale(actorId, sellInstanceId) {
+    const ctx = this._saleCtx; if (!ctx || ctx.actor.id !== actorId) return;
     this._saleCtx = null; this.state.pendingRequest = null;
     this.useCard(ctx.actor, ctx.sourceCard, ctx.targetId, { sellInstanceId });
   }
@@ -858,21 +869,21 @@ class GameEngine {
     const candidates = actor.hand.filter((c) => c.instanceId !== sourceCard.instanceId && !this.isCardSealed(c));
     if (candidates.length === 0) { this.log("정렬할 카드가 없습니다.", "system"); this.emit(); return; }
     this._replaceCtx = { actor, sourceCard };
-    this.state.pendingRequest = { kind: "replace", candidates: candidates.map((c) => ({ ...c, _replaceValue: "버리고 새 카드 1장 획득" })) };
+    this.state.pendingRequest = { kind: "replace", ownerId: actor.id, candidates: candidates.map((c) => ({ ...c, _replaceValue: "버리고 새 카드 1장 획득" })) };
     this.emit();
   }
-  submitReplace(replaceInstanceId) {
-    const ctx = this._replaceCtx; if (!ctx) return;
+  submitReplace(actorId, replaceInstanceId) {
+    const ctx = this._replaceCtx; if (!ctx || ctx.actor.id !== actorId) return;
     this._replaceCtx = null; this.state.pendingRequest = null;
     this.useCard(ctx.actor, ctx.sourceCard, ctx.actor.id, { replaceInstanceId });
   }
   openRedistributeModal(actor, card) {
     this._redistCtx = { actor, card };
-    this.state.pendingRequest = { kind: "redistribute", hp: actor.hp, mp: actor.mp, gp: actor.gp, total: actor.hp + actor.mp + actor.gp, maxHp: actor.maxHp, maxMp: actor.maxMp, maxGp: actor.maxGp };
+    this.state.pendingRequest = { kind: "redistribute", ownerId: actor.id, hp: actor.hp, mp: actor.mp, gp: actor.gp, total: actor.hp + actor.mp + actor.gp, maxHp: actor.maxHp, maxMp: actor.maxMp, maxGp: actor.maxGp };
     this.emit();
   }
-  submitRedistribute(hp, mp, gp) {
-    const ctx = this._redistCtx; if (!ctx) return false;
+  submitRedistribute(actorId, hp, mp, gp) {
+    const ctx = this._redistCtx; if (!ctx || ctx.actor.id !== actorId) return false;
     const actor = ctx.actor; const card = ctx.card; const beforeTotal = actor.hp + actor.mp + actor.gp;
     if (![hp, mp, gp].every((v) => Number.isInteger(v))) { this.log("환전 실패: 입력값이 올바르지 않습니다.", "trade"); return false; }
     if (hp < 1) { this.log("환전 실패: HP는 1 이상이어야 합니다.", "trade"); return false; }
@@ -887,8 +898,8 @@ class GameEngine {
     this.finishMainAction(actor);
     return true;
   }
-  cancelRedistribute() {
-    if (!this._redistCtx) return;
+  cancelRedistribute(actorId) {
+    if (!this._redistCtx || this._redistCtx.actor.id !== actorId) return;
     this._redistCtx = null; this.state.pendingRequest = null;
     this.log("환전이 취소되어 현재 자원을 유지합니다.", "trade");
     this.emit();
@@ -931,10 +942,6 @@ class GameEngine {
         p.hp = 0; p.alive = false;
         if (!this.state.eliminationOrder.includes(p.id)) this.state.eliminationOrder.push(p.id);
         this.log(`${p.name} 탈락.`, "death");
-        if (p.id === this.player().id && !this.state.playerEliminated) {
-          this.state.playerEliminated = true;
-          this.log("플레이어가 탈락했습니다. 이제 전투를 관전합니다.", "defeat");
-        }
       }
     });
     const alive = this.livingParticipants();
@@ -942,9 +949,7 @@ class GameEngine {
       this.state.gameOver = true;
       this.state.phase = "gameOver";
       this.state.winnerId = alive[0] ? alive[0].id : null;
-      const p = this.player();
-      if (alive.length === 1 && alive[0].id === p.id) this.log("승리: 플레이어가 마지막 생존자가 되었습니다.", "victory");
-      else this.log(`전투 종료: ${alive[0] ? alive[0].name : "-"}이 최후의 생존자입니다.`, "system");
+      this.log(`전투 종료: ${alive[0] ? alive[0].name : "-"}이 최후의 생존자입니다.`, "victory");
       this.emit();
     }
   }
@@ -972,7 +977,10 @@ function logTypeLabel(type) {
   return { attack: "공격", defense: "방어", heal: "회복", trade: "거래", status: "상태", system: "시스템", death: "탈락", victory: "승리", defeat: "패배" }[type] || "로그";
 }
 
-window.GE = {
+/* isomorphic export: 브라우저는 window.GE, 서버(Workers/Node)는 module.exports */
+const GE = {
   GameEngine, CARDS, STAT, CATEGORY_LABEL, PATH_LABEL, EMOTION_LABEL, AI_TYPE_LABEL, AI_TYPES, DISEASE_NAME,
   isProtectionScript, signed, clamp, logTypeLabel,
 };
+if (typeof window !== "undefined") window.GE = GE;
+if (typeof module !== "undefined" && module.exports) module.exports = GE;
