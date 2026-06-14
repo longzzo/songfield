@@ -29,7 +29,7 @@
     window.PARTYKIT_HOST =
       (location.hostname === "127.0.0.1" || location.hostname === "localhost")
         ? "127.0.0.1:8787"
-        : "card-duel.YOUR-SUBDOMAIN.workers.dev"; // TODO: `wrangler deploy` 후 실제 호스트로 교체
+        : "card-duel.back10092.workers.dev"; // 배포된 Cloudflare Workers 호스트
   </script>
   <script type="module">
     import { PartySocket } from "https://esm.sh/partysocket@1.2.0";
