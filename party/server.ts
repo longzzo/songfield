@@ -34,8 +34,9 @@ const CHAT_POOL = [
 ];
 const REPLY_LINES = ["ㅇㅈ", "ㅋㅋㅋ", "그쵸", "좋네요", "기대됨", "화이팅"];
 
-const MIN_PLAYERS = 4;
+const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 10;
+const START_MIN = 2;
 
 type Player = {
   id: string;
@@ -73,6 +74,7 @@ export class CardDuel extends Server<Env> {
   maxPlayers = 8;
   chat: ChatMsg[] = [];
   chatSeq = 1;
+  botSeq = 0;
   botTimers = new Set<ReturnType<typeof setTimeout>>();
 
   /* ---------- helpers ---------- */
@@ -107,29 +109,29 @@ export class CardDuel extends Server<Env> {
     humans.forEach((p) => { p.isHost = p.id === this.hostId; });
   }
 
-  /* ---------- 봇 채움 ---------- */
-  syncBots() {
-    const humanCount = this.humans.size;
-    const want = Math.max(0, this.maxPlayers - humanCount);
-    if (this.bots.length > want) {
-      this.bots = this.bots.slice(0, want);
-    } else if (this.bots.length < want) {
-      const usedNames = new Set(this.roster().map((p) => p.nickname));
-      const freeNames = shuffle(BOT_NAMES.filter((n) => !usedNames.has(n)));
-      const types = shuffle(AI_TYPES);
-      let ni = 0;
-      while (this.bots.length < want) {
-        const idx = this.bots.length;
-        const nickname = freeNames[ni++] || `결투자${idx + 1}`;
-        const bot: Player = {
-          id: `bot_${idx}_${Math.random().toString(36).slice(2, 6)}`,
-          nickname, isHost: false, isReady: false, isOnline: true,
-          isBot: true, aiType: types[idx % types.length],
-        };
-        this.bots.push(bot);
-        if (this.status === "lobby") this.scheduleBotReady(bot, idx);
-      }
-    }
+  /* ---------- 봇 추가/제거 (방장이 수동으로) ---------- */
+  addBot() {
+    if (this.roster().length >= this.maxPlayers) return;
+    const usedNames = new Set(this.roster().map((p) => p.nickname));
+    const freeNames = shuffle(BOT_NAMES.filter((n) => !usedNames.has(n)));
+    const idx = this.botSeq++;
+    const nickname = freeNames[0] || `결투자${this.roster().length + 1}`;
+    const bot: Player = {
+      id: `bot_${idx}_${Math.random().toString(36).slice(2, 6)}`,
+      nickname, isHost: false, isReady: false, isOnline: true,
+      isBot: true, aiType: pick(AI_TYPES),
+    };
+    this.bots.push(bot);
+    if (this.status === "lobby") this.scheduleBotReady(bot, 0);
+  }
+  removeBot(id?: string) {
+    if (!this.bots.length) return;
+    if (id) this.bots = this.bots.filter((b) => b.id !== id);
+    else this.bots.pop();
+  }
+  // 사람은 절대 밀어내지 않고, 정원을 넘는 봇만 제거.
+  trimBotsToCapacity() {
+    while (this.roster().length > this.maxPlayers && this.bots.length) this.bots.pop();
   }
   scheduleBotReady(bot: Player, i: number) {
     const t = setTimeout(() => {
@@ -158,7 +160,9 @@ export class CardDuel extends Server<Env> {
     };
     this.humans.set(connection.id, player);
     this.ensureHost();
-    this.syncBots();
+    // 사람이 들어오면 정원이 모자라도 사람은 항상 수용하고, 넘치는 봇은 비운다.
+    this.maxPlayers = Math.max(this.maxPlayers, this.humans.size);
+    this.trimBotsToCapacity();
     // 신규 접속자에게 현재 채팅 히스토리 전달
     connection.send(JSON.stringify({ type: "history", chat: this.chat, selfId: connection.id }));
     this.broadcastRoom();
@@ -177,11 +181,11 @@ export class CardDuel extends Server<Env> {
         const first = !this.joined.has(me.id);
         me.nickname = nick;
         this.joined.add(me.id);
-        // 인원 수는 방장만 설정 가능
+        // 최대 인원(정원)은 방장만 설정. 빈자리는 자동으로 채우지 않는다.
         if (me.id === this.hostId && typeof msg.maxPlayers === "number") {
-          this.maxPlayers = Math.min(MAX_PLAYERS, Math.max(MIN_PLAYERS, Math.floor(msg.maxPlayers)));
+          const v = Math.min(MAX_PLAYERS, Math.max(MIN_PLAYERS, Math.floor(msg.maxPlayers)));
+          this.maxPlayers = Math.max(this.humans.size, v);
         }
-        this.syncBots();
         if (first && me.id === this.hostId) {
           this.pushChat({ sys: true, text: `${nick} 님이 방을 만들었습니다. 친구를 코드로 초대하거나 봇과 시작하세요.` });
         } else if (first) {
@@ -197,8 +201,22 @@ export class CardDuel extends Server<Env> {
       }
       case "setMax": {
         if (me.id !== this.hostId) break;
-        this.maxPlayers = Math.min(MAX_PLAYERS, Math.max(MIN_PLAYERS, Math.floor(msg.value)));
-        this.syncBots();
+        let v = Math.min(MAX_PLAYERS, Math.max(MIN_PLAYERS, Math.floor(msg.value)));
+        v = Math.max(v, this.humans.size); // 사람 수 아래로는 못 내림
+        this.maxPlayers = v;
+        this.trimBotsToCapacity();
+        this.broadcastRoom();
+        break;
+      }
+      case "addBot": {
+        if (me.id !== this.hostId) break;
+        this.addBot();
+        this.broadcastRoom();
+        break;
+      }
+      case "removeBot": {
+        if (me.id !== this.hostId) break;
+        this.removeBot(typeof msg.id === "string" ? msg.id : undefined);
         this.broadcastRoom();
         break;
       }
@@ -220,7 +238,7 @@ export class CardDuel extends Server<Env> {
       case "start": {
         if (me.id !== this.hostId) break;
         const everyoneReady = this.roster().every((p) => p.isReady);
-        if (!everyoneReady) break;
+        if (!everyoneReady || this.roster().length < START_MIN) break;
         this.clearBotTimers();
         this.status = "playing";
         // Phase 1: 전투는 각 클라이언트 로컬 엔진에서 동일 roster 로 진행한다.
@@ -258,7 +276,6 @@ export class CardDuel extends Server<Env> {
       this.joined.delete(id);
     }
     this.ensureHost();
-    this.syncBots();
     this.broadcastRoom();
   }
 }

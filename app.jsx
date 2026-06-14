@@ -52,6 +52,8 @@ function useRoom({ onStart, onBackToRoom }) {
   const joinRoom = (code, nickname, count) => connect((code || genCode()).slice(0, 6).toUpperCase(), nickname, count);
   const toggleReady = () => send({ type: "ready" });
   const setMax = (value) => send({ type: "setMax", value });
+  const addBot = () => send({ type: "addBot" });
+  const removeBot = (id) => send({ type: "removeBot", id });
   const requestStart = () => send({ type: "start" });
   const requestBackToRoom = () => send({ type: "backToRoom" });
   const sendChat = (text) => send({ type: "chat", text });
@@ -63,7 +65,7 @@ function useRoom({ onStart, onBackToRoom }) {
   useEA(() => () => { if (sockRef.current) { try { sockRef.current.close(); } catch (e) {} } }, []);
 
   const me = room && selfId.current ? room.players.find((p) => p.id === selfId.current) : null;
-  return { room, chat, me, selfId: selfId.current, createRoom, joinRoom, toggleReady, setMax, requestStart, requestBackToRoom, sendChat, leaveRoom };
+  return { room, chat, me, selfId: selfId.current, createRoom, joinRoom, toggleReady, setMax, addBot, removeBot, requestStart, requestBackToRoom, sendChat, leaveRoom };
 }
 
 function useGame() {
@@ -126,7 +128,9 @@ function App() {
       )}
       {screen === "room" && roomApi.room && (
         <RoomScreen room={roomApi.room} chat={roomApi.chat} me={roomApi.me}
-          onToggleReady={roomApi.toggleReady} onSetMax={roomApi.setMax} onStart={start} onSend={roomApi.sendChat} onLeave={toLobby} />
+          onToggleReady={roomApi.toggleReady} onSetMax={roomApi.setMax}
+          onAddBot={roomApi.addBot} onRemoveBot={roomApi.removeBot}
+          onStart={start} onSend={roomApi.sendChat} onLeave={toLobby} />
       )}
       {screen === "room" && !roomApi.room && (
         <div className="center-stage"><div className="parchment-card"><div className="title-xl">연결 중…</div><div className="subtitle">방에 접속하고 있습니다.</div></div></div>

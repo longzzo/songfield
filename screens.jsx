@@ -27,8 +27,8 @@ function LobbyScreen({ nickname, setNickname, playerCount, setPlayerCount, onCre
         </div>
 
         <div className="field">
-          <label>최대 인원 · {playerCount}명 (빈자리는 봇이 채웁니다)</label>
-          <input type="range" min={4} max={10} value={playerCount} style={{ accentColor: "var(--gold)" }} onChange={(e) => setPlayerCount(Number(e.target.value))} />
+          <label>최대 인원 · {playerCount}명 (대기실에서 봇을 직접 추가합니다)</label>
+          <input type="range" min={2} max={10} value={playerCount} style={{ accentColor: "var(--gold)" }} onChange={(e) => setPlayerCount(Number(e.target.value))} />
         </div>
 
         <div style={{ marginTop: 18 }}>
@@ -49,7 +49,7 @@ function LobbyScreen({ nickname, setNickname, playerCount, setPlayerCount, onCre
 }
 
 /* ---------------- Room ---------------- */
-function RoomScreen({ room, chat, me, onToggleReady, onStart, onSend, onLeave }) {
+function RoomScreen({ room, chat, me, onToggleReady, onSetMax, onAddBot, onRemoveBot, onStart, onSend, onLeave }) {
   const [draft, setDraft] = useS("");
   const [copied, setCopied] = useS(false);
   const chatRef = useR(null);
@@ -57,6 +57,10 @@ function RoomScreen({ room, chat, me, onToggleReady, onStart, onSend, onLeave })
 
   const everyoneReady = room.players.every((p) => p.isReady);
   const isHost = me && me.isHost;
+  const maxPlayers = room.maxPlayers || room.players.length;
+  const botCount = room.players.filter((p) => p.isBot).length;
+  const isFull = room.players.length >= maxPlayers;
+  const canStart = everyoneReady && room.players.length >= 2;
   const copy = () => {
     navigator.clipboard?.writeText(room.code).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1400); }).catch(() => {});
   };
@@ -81,7 +85,7 @@ function RoomScreen({ room, chat, me, onToggleReady, onStart, onSend, onLeave })
 
       <div className="room-grid">
         <div className="panel">
-          <div className="panel-title">참가자 <span className="muted">{room.players.length}명</span></div>
+          <div className="panel-title">참가자 <span className="muted">{room.players.length}/{maxPlayers}명</span></div>
           {room.players.map((p) => (
             <div key={p.id} className={"seat" + (me && p.id === me.id ? " me" : "")}>
               <Avatar name={p.nickname} isBot={p.isBot} />
@@ -100,14 +104,32 @@ function RoomScreen({ room, chat, me, onToggleReady, onStart, onSend, onLeave })
             </div>
           ))}
 
+          {isHost && (
+            <div className="host-controls">
+              <div className="host-controls-row">
+                <span className="muted" style={{ fontSize: 12 }}>최대 인원 {maxPlayers}명 · 봇 {botCount}</span>
+                <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+                  <button className="btn sm" disabled={maxPlayers <= Math.max(2, room.players.length)} onClick={() => onSetMax(maxPlayers - 1)}>정원 −</button>
+                  <button className="btn sm" disabled={maxPlayers >= 10} onClick={() => onSetMax(maxPlayers + 1)}>정원 +</button>
+                </div>
+              </div>
+              <div className="host-controls-row" style={{ marginTop: 8 }}>
+                <button className="btn sm block" disabled={isFull} onClick={onAddBot}>봇 추가</button>
+                <button className="btn sm ghost block" disabled={botCount === 0} onClick={() => onRemoveBot()}>봇 제거</button>
+              </div>
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: 9, marginTop: 12 }}>
             <button className={"btn block" + (me && me.isReady ? "" : " gold")} onClick={onToggleReady}>
               {me && me.isReady ? "준비 해제" : "준비 완료"}
             </button>
           </div>
-          <button className="btn gold block" style={{ marginTop: 9 }} disabled={!isHost || !everyoneReady}
+          <button className="btn gold block" style={{ marginTop: 9 }} disabled={!isHost || !canStart}
             onClick={onStart}>
-            {isHost ? (everyoneReady ? "결투 시작" : "전원 준비 대기 중…") : "방장이 시작할 수 있습니다"}
+            {isHost
+              ? (room.players.length < 2 ? "최소 2명 필요 (봇을 추가하세요)" : (everyoneReady ? "결투 시작" : "전원 준비 대기 중…"))
+              : "방장이 시작할 수 있습니다"}
           </button>
         </div>
 
