@@ -1,13 +1,22 @@
 /* =========================================================
-  멀티 카드 결투 — 로비 파티 서버 (Phase 1)
-  방 1개 = 파티 1개 (파티 id = 방 코드).
+  멀티 카드 결투 — 로비 서버 (Phase 1)
+  Cloudflare Workers + Durable Objects (partyserver) 위에서 동작.
+  방 1개 = Durable Object 인스턴스 1개 (이름 = 방 코드).
   참가자 좌석 / 호스트 / 준비 / 채팅 / 봇 채움 / 끊김을 서버가 관리하고
   접속된 모든 클라이언트에 브로드캐스트한다.
+
+  무료 *.workers.dev 로 `wrangler deploy` 하면 끝. (PartyKit 관리형 호스팅 불필요)
+  클라이언트는 partysocket 으로 /parties/card-duel/<방코드> 에 붙는다.
 
   Phase 1 범위: 로비·접속·준비·채팅·끊김만 진짜 멀티.
   실제 전투 동기화(서버 권위 엔진)는 Phase 2에서 추가한다.
 ========================================================= */
-import type * as Party from "partykit/server";
+import {
+  Server,
+  routePartykitRequest,
+  type Connection,
+  type ConnectionContext,
+} from "partyserver";
 
 const AI_TYPES = [
   "aggressive", "defensive", "alchemist", "trader", "mage",
@@ -40,6 +49,10 @@ type Player = {
 type ChatMsg = { id: number; name?: string; text: string; sys?: boolean };
 type LobbyStatus = "lobby" | "playing";
 
+interface Env {
+  CardDuel: DurableObjectNamespace<CardDuel>;
+}
+
 function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
 function shuffle<T>(arr: T[]): T[] {
   const a = arr.slice();
@@ -47,7 +60,10 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-export default class CardDuelServer implements Party.Server {
+export class CardDuel extends Server<Env> {
+  // 봇 타이머/메모리 상태를 유지해야 하므로 하이버네이션 비활성화.
+  static options = { hibernate: false };
+
   // 사람 좌석: 연결 id -> Player (봇은 별도)
   humans = new Map<string, Player>();
   joined = new Set<string>();
@@ -59,8 +75,6 @@ export default class CardDuelServer implements Party.Server {
   chatSeq = 1;
   botTimers = new Set<ReturnType<typeof setTimeout>>();
 
-  constructor(readonly room: Party.Room) {}
-
   /* ---------- helpers ---------- */
   roster(): Player[] {
     return [...this.humans.values(), ...this.bots];
@@ -69,20 +83,20 @@ export default class CardDuelServer implements Party.Server {
     const m: ChatMsg = { id: this.chatSeq++, ...msg };
     this.chat.push(m);
     if (this.chat.length > 200) this.chat = this.chat.slice(-200);
-    this.room.broadcast(JSON.stringify({ type: "chat", message: m }));
+    this.broadcast(JSON.stringify({ type: "chat", message: m }));
   }
   broadcastRoom() {
     const payload = JSON.stringify({
       type: "room",
       room: {
-        code: this.room.id,
+        code: this.name,
         players: this.roster(),
         hostId: this.hostId,
         status: this.status,
         maxPlayers: this.maxPlayers,
       },
     });
-    this.room.broadcast(payload);
+    this.broadcast(payload);
   }
   ensureHost() {
     const humans = [...this.humans.values()];
@@ -131,10 +145,10 @@ export default class CardDuelServer implements Party.Server {
   clearBotTimers() { this.botTimers.forEach((t) => clearTimeout(t)); this.botTimers.clear(); }
 
   /* ---------- 연결 수명주기 ---------- */
-  onConnect(conn: Party.Connection) {
+  onConnect(connection: Connection, _ctx: ConnectionContext) {
     // 이미 진행 중인 방이라면 관전/대기. nickname 은 join 메시지로 확정.
     const player: Player = {
-      id: conn.id,
+      id: connection.id,
       nickname: "결투자",
       isHost: false,
       isReady: false,
@@ -142,15 +156,16 @@ export default class CardDuelServer implements Party.Server {
       isBot: false,
       aiType: "human",
     };
-    this.humans.set(conn.id, player);
+    this.humans.set(connection.id, player);
     this.ensureHost();
     this.syncBots();
     // 신규 접속자에게 현재 채팅 히스토리 전달
-    conn.send(JSON.stringify({ type: "history", chat: this.chat, selfId: conn.id }));
+    connection.send(JSON.stringify({ type: "history", chat: this.chat, selfId: connection.id }));
     this.broadcastRoom();
   }
 
-  onMessage(raw: string, sender: Party.Connection) {
+  onMessage(sender: Connection, message: string | ArrayBuffer) {
+    const raw = typeof message === "string" ? message : "";
     let msg: any;
     try { msg = JSON.parse(raw); } catch { return; }
     const me = this.humans.get(sender.id);
@@ -170,7 +185,7 @@ export default class CardDuelServer implements Party.Server {
         if (first && me.id === this.hostId) {
           this.pushChat({ sys: true, text: `${nick} 님이 방을 만들었습니다. 친구를 코드로 초대하거나 봇과 시작하세요.` });
         } else if (first) {
-          this.pushChat({ sys: true, text: `${nick} 님이 ${this.room.id} 방에 참가했습니다.` });
+          this.pushChat({ sys: true, text: `${nick} 님이 ${this.name} 방에 참가했습니다.` });
         }
         this.broadcastRoom();
         break;
@@ -211,7 +226,7 @@ export default class CardDuelServer implements Party.Server {
         // Phase 1: 전투는 각 클라이언트 로컬 엔진에서 동일 roster 로 진행한다.
         const roster = this.roster().map((p) => ({ id: p.id, nickname: p.nickname, isBot: p.isBot, aiType: p.aiType }));
         this.pushChat({ sys: true, text: "결투가 시작되었습니다. 행운을 빕니다." });
-        this.room.broadcast(JSON.stringify({ type: "start", roster, hostId: this.hostId }));
+        this.broadcast(JSON.stringify({ type: "start", roster, hostId: this.hostId }));
         this.broadcastRoom();
         break;
       }
@@ -221,15 +236,15 @@ export default class CardDuelServer implements Party.Server {
         this.roster().forEach((p) => { p.isReady = false; p.isOnline = true; });
         this.bots.forEach((b, i) => this.scheduleBotReady(b, i));
         this.pushChat({ sys: true, text: "대기실로 돌아왔습니다. 다시 준비하세요." });
-        this.room.broadcast(JSON.stringify({ type: "backToRoom" }));
+        this.broadcast(JSON.stringify({ type: "backToRoom" }));
         this.broadcastRoom();
         break;
       }
     }
   }
 
-  onClose(conn: Party.Connection) { this.dropHuman(conn.id); }
-  onError(conn: Party.Connection) { this.dropHuman(conn.id); }
+  onClose(connection: Connection) { this.dropHuman(connection.id); }
+  onError(connection: Connection) { this.dropHuman(connection.id); }
 
   dropHuman(id: string) {
     const me = this.humans.get(id);
@@ -247,3 +262,13 @@ export default class CardDuelServer implements Party.Server {
     this.broadcastRoom();
   }
 }
+
+/* Worker 엔트리: /parties/card-duel/<방코드> 요청을 위 Durable Object 로 라우팅 */
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    return (
+      (await routePartykitRequest(request, env)) ||
+      new Response("Not Found", { status: 404 })
+    );
+  },
+} satisfies ExportedHandler<Env>;

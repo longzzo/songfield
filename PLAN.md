@@ -15,10 +15,14 @@
 
 ## 사전 준비 (사용자 작업 — 인증 필요)
 
-- GitHub 계정 + `gh auth login` (Pages용 공개 리포 생성/푸시).
-- PartyKit 로그인: `npx partykit login` (GitHub OAuth). 배포는 무료 PartyKit/Cloudflare로.
-- PartyKit 배포 후 받은 프로덕션 호스트(`<project>.<user>.partykit.dev`)를 클라이언트
-  설정 상수에 기입한다.
+- GitHub 계정 (Pages 배포용).
+- Cloudflare 계정(무료) + `npx wrangler login` (Cloudflare OAuth). 서버는 무료 Workers/Durable
+  Objects(SQLite)로 배포.
+- `npx wrangler deploy` 후 받은 프로덕션 호스트(`<name>.<subdomain>.workers.dev`)를 클라이언트
+  설정 상수(`index.html`의 `PARTYKIT_HOST`)에 기입한다.
+
+> 참고: 서버는 PartyKit 관리형 호스팅 대신 Cloudflare 네이티브 `partyserver` + `wrangler`로 이식됨
+> (PartyKit 관리형 로그인 장애 우회). 클라이언트는 여전히 `partysocket`으로 접속한다.
 
 ---
 

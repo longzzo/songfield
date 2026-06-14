@@ -31,7 +31,7 @@ function useRoom({ onStart, onBackToRoom }) {
     setRoom(null); setChat([]); selfId.current = null;
 
     whenPartySocketReady(() => {
-      const socket = new window.PartySocket({ host: window.PARTYKIT_HOST, room: code });
+      const socket = new window.PartySocket({ host: window.PARTYKIT_HOST, party: "card-duel", room: code });
       sockRef.current = socket;
 
       socket.addEventListener("open", () => {
