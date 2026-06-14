@@ -6,7 +6,8 @@ const GS = window.GE;
 
 const PHASE_LABEL = {
   init: "초기화", playerAction: "플레이어 행동", selectTarget: "대상 선택",
-  sacrifice: "바칠 카드 선택", defense: "공격 대응", aiActing: "상대 행동 중", gameOver: "게임 종료",
+  sacrifice: "바칠 카드 선택", defense: "공격 대응", aiActing: "상대 행동 중",
+  between: "턴 전환", gameOver: "게임 종료",
 };
 
 /* ---------------- Lobby ---------------- */
@@ -152,39 +153,43 @@ function RoomScreen({ room, chat, me, onToggleReady, onSetMax, onAddBot, onRemov
   );
 }
 
-/* ---------------- Game ---------------- */
-function cardClickable(engine, card) {
-  const st = engine.state;
-  if (st.phase === "sacrifice") return !engine.isCardSealed(card);
-  return engine.isPlayerTurn() && card.timing === "active" && !engine.isCardSealed(card) && engine.canPay(engine.player(), card.cost);
+/* ---------------- Game (서버 상태 기반 렌더) ---------------- */
+function cardClickable(state, myId, card) {
+  if (state.phase === "sacrifice") return state.currentActorId === myId && !GS.cardSealed(card);
+  const me = state.participants.find((p) => p.id === myId);
+  return GS.isMyTurn(state, myId) && card.timing === "active" && !GS.cardSealed(card) && me && GS.canPayCost(me, card.cost);
 }
-function cardReason(engine, card) {
-  const st = engine.state;
-  if (st.phase === "sacrifice") return engine.isCardSealed(card) ? "봉인된 카드는 바칠 수 없음" : "바치기 선택 가능";
-  if (!engine.isPlayerTurn()) return "내 턴이 아님";
-  if (engine.isCardSealed(card)) return "봉인됨";
+function cardReason(state, myId, card) {
+  if (state.phase === "sacrifice") return GS.cardSealed(card) ? "봉인된 카드는 바칠 수 없음" : "바치기 선택 가능";
+  if (!GS.isMyTurn(state, myId)) return "내 턴이 아님";
+  if (GS.cardSealed(card)) return "봉인됨";
   if (card.timing !== "active") return "공격 대응 시에만 사용";
-  if (!engine.canPay(engine.player(), card.cost)) return "비용 부족";
+  const me = state.participants.find((p) => p.id === myId);
+  if (me && !GS.canPayCost(me, card.cost)) return "비용 부족";
   return "";
 }
 
-function GameScreen({ engine, onlineById, offlineNames }) {
-  const st = engine.state;
+function GameScreen({ state, myId, sendAction, onlineById, offlineNames }) {
+  const st = state;
   if (!st) return null;
-  const me = engine.player();
-  const current = engine.getParticipant(st.currentActorId);
-  const isMyTurn = engine.isPlayerTurn();
+  const me = st.participants.find((p) => p.id === myId);
+  const current = st.participants.find((p) => p.id === st.currentActorId);
+  const isMyTurn = GS.isMyTurn(st, myId);
+  const myAlive = !me || me.alive;
   const hasModal = !!st.pendingRequest;
-  const opponents = st.participants.filter((p) => p.type !== "player");
-  const alive = engine.livingParticipants().length;
+  const opponents = st.participants.filter((p) => p.id !== myId);
+  const alive = st.participants.filter((p) => p.alive).length;
 
   const notice = (() => {
-    if (st.phase === "playerAction" && isMyTurn) return { cls: "", text: "당신의 턴입니다. 카드 · 마법 각인 · 기본 행동을 선택하세요.", ping: true };
-    if (st.phase === "selectTarget") return { cls: "", text: "효과를 적용할 대상을 선택하세요.", ping: true };
-    if (st.phase === "sacrifice") return { cls: "", text: "바칠 카드를 손패에서 선택하세요.", ping: true };
-    if (me.alive === false) return { cls: "ai", text: "관전 중입니다. 남은 결투의 전개를 지켜보세요." };
+    if (isMyTurn) return { cls: "", text: "당신의 턴입니다. 카드 · 마법 각인 · 기본 행동을 선택하세요.", ping: true };
+    if (st.phase === "selectTarget" && st.pendingAction && st.pendingAction.actorId === myId) return { cls: "", text: "효과를 적용할 대상을 선택하세요.", ping: true };
+    if (st.phase === "sacrifice" && st.currentActorId === myId) return { cls: "", text: "바칠 카드를 손패에서 선택하세요.", ping: true };
+    if (me && me.alive === false) return { cls: "ai", text: "관전 중입니다. 남은 결투의 전개를 지켜보세요." };
     return { cls: "ai", text: `${current ? current.name : "상대"} 님이 행동 중입니다…` };
   })();
+
+  const myTurnSelect = st.phase === "selectTarget" && st.pendingAction && st.pendingAction.actorId === myId;
+  const mySacrifice = st.phase === "sacrifice" && st.currentActorId === myId;
 
   return (
     <div className="game-root">
@@ -195,7 +200,7 @@ function GameScreen({ engine, onlineById, offlineNames }) {
           <div className="stat-pill"><b>{st.round}</b><span>Round</span></div>
           <div className="stat-pill"><b>{alive}</b><span>Alive</span></div>
           <div className="stat-pill" style={{ minWidth: 104 }}><b style={{ fontSize: 13 }}>{current ? current.name : "-"}</b><span>Turn</span></div>
-          <div className="stat-pill" style={{ minWidth: 112 }}><b style={{ fontSize: 12 }}>{PHASE_LABEL[st.phase]}</b><span>Phase</span></div>
+          <div className="stat-pill" style={{ minWidth: 112 }}><b style={{ fontSize: 12 }}>{PHASE_LABEL[st.phase] || "진행"}</b><span>Phase</span></div>
         </div>
       </div>
 
@@ -204,8 +209,8 @@ function GameScreen({ engine, onlineById, offlineNames }) {
       <div className={"notice " + notice.cls}>
         {notice.ping && <span className="ping" />}
         <span>{notice.text}</span>
-        {st.phase === "selectTarget" && <button className="btn sm ghost" style={{ marginLeft: "auto" }} onClick={() => engine.cancelTarget()}>취소</button>}
-        {st.phase === "sacrifice" && <button className="btn sm ghost" style={{ marginLeft: "auto" }} onClick={() => engine.cancelOffer()}>취소</button>}
+        {myTurnSelect && <button className="btn sm ghost" style={{ marginLeft: "auto" }} onClick={() => sendAction("cancelTarget")}>취소</button>}
+        {mySacrifice && <button className="btn sm ghost" style={{ marginLeft: "auto" }} onClick={() => sendAction("cancelOffer")}>취소</button>}
       </div>
 
       <div className="battle-grid">
@@ -214,10 +219,10 @@ function GameScreen({ engine, onlineById, offlineNames }) {
           <div className="opp-grid">
             {opponents.map((p) => (
               <ParticipantCard key={p.id} p={p}
-                selectable={st.phase === "selectTarget" && p.alive}
+                selectable={myTurnSelect && p.alive}
                 current={p.id === st.currentActorId}
                 online={onlineById[p.id]}
-                onSelect={(id) => engine.selectTarget(id)} />
+                onSelect={(id) => sendAction("selectTarget", id)} />
             ))}
           </div>
         </div>
@@ -228,6 +233,7 @@ function GameScreen({ engine, onlineById, offlineNames }) {
         </div>
       </div>
 
+      {me && (
       <div className="console-grid">
         <div className={"console-card you" + (isMyTurn ? " active" : "")}>
           <div className="section-h">
@@ -244,42 +250,45 @@ function GameScreen({ engine, onlineById, offlineNames }) {
             <span className="tiny">감정 {GS.EMOTION_LABEL[me.emotionPath || "none"]}</span>
           </div>
           <div className="you-status"><StatusBadges p={me} /></div>
-          <TurnTimer activeKey={isMyTurn && !hasModal ? `${st.round}-${st.orderIndex}` : null} durationMs={30000} onTimeout={() => engine.playerTimeout()} />
+          <TurnTimer activeKey={isMyTurn && !hasModal ? `${st.round}-${st.orderIndex}` : null} durationMs={30000} onTimeout={() => sendAction("skipTurn")} />
         </div>
 
         <div className="console-card">
           <div className="section-h">마법 각인 <span className="muted">{me.imprints.length}/{GS.STAT.maxImprints}</span></div>
-          <ImprintList imprints={me.imprints} player={me} isTurn={isMyTurn} engine={engine} />
+          <ImprintList imprints={me.imprints} player={me} isTurn={isMyTurn} sendAction={sendAction} />
         </div>
 
         <div className="console-card">
           <div className="section-h">기본 행동</div>
           <div className="action-col">
-            <button className="btn" disabled={!isMyTurn || me.hand.some((c) => c.category === "weapon")} onClick={() => engine.pray()}>기도</button>
-            <button className="btn" disabled={!isMyTurn || me.hand.length === 0} onClick={() => engine.startOffer()}>바치기</button>
-            <button className="btn ghost" disabled={!isMyTurn} onClick={() => engine.skipTurn()}>턴 넘기기</button>
+            <button className="btn" disabled={!isMyTurn || me.hand.some((c) => c.category === "weapon")} onClick={() => sendAction("pray")}>기도</button>
+            <button className="btn" disabled={!isMyTurn || me.hand.length === 0} onClick={() => sendAction("startOffer")}>바치기</button>
+            <button className="btn ghost" disabled={!isMyTurn} onClick={() => sendAction("skipTurn")}>턴 넘기기</button>
           </div>
           <div className="muted" style={{ marginTop: 12, lineHeight: 1.5 }}>
             무기가 없으면 기도로 카드를 보충하고, 불필요한 카드는 바치기로 교체합니다.
           </div>
         </div>
       </div>
+      )}
 
+      {me && (
       <div className="hand-panel">
-        <div className="section-h">손패 <span className="muted">{st.phase === "sacrifice" ? "바칠 카드를 선택하세요" : "카드를 클릭해 사용합니다"}</span></div>
+        <div className="section-h">손패 <span className="muted">{mySacrifice ? "바칠 카드를 선택하세요" : "카드를 클릭해 사용합니다"}</span></div>
         <div className="hand-list">
           {me.hand.length === 0 && <div className="hand-empty">손패가 비었습니다.</div>}
           {me.hand.map((card) => (
             <HandCard key={card.instanceId} card={card}
-              clickable={cardClickable(engine, card)}
-              sealed={engine.isCardSealed(card)}
-              reason={cardReason(engine, card)}
-              onClick={(id) => engine.playCard(id)} />
+              clickable={cardClickable(st, myId, card)}
+              sealed={GS.cardSealed(card)}
+              reason={cardReason(st, myId, card)}
+              onClick={(id) => sendAction("playCard", id)} />
           ))}
         </div>
       </div>
+      )}
 
-      <PendingModal engine={engine} />
+      <PendingModal state={st} myId={myId} sendAction={sendAction} />
     </div>
   );
 }

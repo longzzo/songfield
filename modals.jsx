@@ -23,7 +23,7 @@ function ChoiceCard({ card, value, desc, danger, onClick }) {
   );
 }
 
-function DefenseModal({ req, engine }) {
+function DefenseModal({ req, sendAction }) {
   return (
     <div className="overlay">
       <div className="modal">
@@ -34,9 +34,9 @@ function DefenseModal({ req, engine }) {
         </div>
         <div className="choice-grid">
           {req.defenseCards.map((c) => (
-            <ChoiceCard key={c.instanceId} card={c} value={c._guardValue} onClick={() => engine.chooseDefense(c.instanceId)} />
+            <ChoiceCard key={c.instanceId} card={c} value={c._guardValue} onClick={() => sendAction("chooseDefense", c.instanceId)} />
           ))}
-          <button className="choice-card danger" onClick={() => engine.forgive()}>
+          <button className="choice-card danger" onClick={() => sendAction("forgive")}>
             <div className="cc-title">방어하지 않기 · 용서</div>
             <div className="cc-value">피해를 그대로 받음</div>
             <div className="cc-desc">방어 카드가 있는 상태에서 선택하면 성법 점수를 얻습니다.</div>
@@ -47,7 +47,7 @@ function DefenseModal({ req, engine }) {
   );
 }
 
-function ChoiceModal({ req, engine }) {
+function ChoiceModal({ req, sendAction }) {
   return (
     <div className="overlay">
       <div className="modal">
@@ -55,7 +55,7 @@ function ChoiceModal({ req, engine }) {
         <div className="m-sub">{req.description}</div>
         <div className="choice-grid">
           {req.choices.map((c) => (
-            <ChoiceCard key={c.instanceId} card={c} value="획득 후보" desc={c.text} onClick={() => engine.submitChoice(c.instanceId)} />
+            <ChoiceCard key={c.instanceId} card={c} value="획득 후보" desc={c.text} onClick={() => sendAction("submitChoice", c.instanceId)} />
           ))}
         </div>
       </div>
@@ -63,7 +63,7 @@ function ChoiceModal({ req, engine }) {
   );
 }
 
-function ForcedSaleModal({ req, engine }) {
+function ForcedSaleModal({ req, sendAction }) {
   return (
     <div className="overlay">
       <div className="modal">
@@ -71,7 +71,7 @@ function ForcedSaleModal({ req, engine }) {
         <div className="m-sub"><strong>{req.targetName}</strong>에게 판매할 카드를 선택하세요. 대상은 가격만큼 GP를 잃고, 부족분은 HP 피해로 받습니다.</div>
         <div className="choice-grid">
           {req.candidates.map((c) => (
-            <ChoiceCard key={c.instanceId} card={c} value={c._saleValue} desc={c.text} onClick={() => engine.submitForcedSale(c.instanceId)} />
+            <ChoiceCard key={c.instanceId} card={c} value={c._saleValue} desc={c.text} onClick={() => sendAction("submitForcedSale", c.instanceId)} />
           ))}
         </div>
       </div>
@@ -79,7 +79,7 @@ function ForcedSaleModal({ req, engine }) {
   );
 }
 
-function ReplaceModal({ req, engine }) {
+function ReplaceModal({ req, sendAction }) {
   return (
     <div className="overlay">
       <div className="modal">
@@ -87,7 +87,7 @@ function ReplaceModal({ req, engine }) {
         <div className="m-sub">버리고 새 카드로 교체할 카드를 선택하세요.</div>
         <div className="choice-grid">
           {req.candidates.map((c) => (
-            <ChoiceCard key={c.instanceId} card={c} value={c._replaceValue} desc={c.text} onClick={() => engine.submitReplace(c.instanceId)} />
+            <ChoiceCard key={c.instanceId} card={c} value={c._replaceValue} desc={c.text} onClick={() => sendAction("submitReplace", c.instanceId)} />
           ))}
         </div>
       </div>
@@ -95,7 +95,7 @@ function ReplaceModal({ req, engine }) {
   );
 }
 
-function RedistributeModal({ req, engine }) {
+function RedistributeModal({ req, sendAction }) {
   const [hp, setHp] = useStateM(req.hp);
   const [mp, setMp] = useStateM(req.mp);
   const gp = req.total - hp - mp;
@@ -125,22 +125,22 @@ function RedistributeModal({ req, engine }) {
           <span>{valid ? "분배 가능" : "GP가 범위를 벗어났습니다"}</span>
         </div>
         <div className="m-actions">
-          <button className="btn ghost" onClick={() => engine.cancelRedistribute()}>취소</button>
-          <button className="btn gold" disabled={!valid} onClick={() => engine.submitRedistribute(hp, mp, gp)}>재분배</button>
+          <button className="btn ghost" onClick={() => sendAction("cancelRedistribute")}>취소</button>
+          <button className="btn gold" disabled={!valid} onClick={() => sendAction("submitRedistribute", hp, mp, gp)}>재분배</button>
         </div>
       </div>
     </div>
   );
 }
 
-function PendingModal({ engine }) {
-  const req = engine.state && engine.state.pendingRequest;
-  if (!req) return null;
-  if (req.kind === "defense") return <DefenseModal req={req} engine={engine} />;
-  if (req.kind === "choice") return <ChoiceModal req={req} engine={engine} />;
-  if (req.kind === "forcedSale") return <ForcedSaleModal req={req} engine={engine} />;
-  if (req.kind === "replace") return <ReplaceModal req={req} engine={engine} />;
-  if (req.kind === "redistribute") return <RedistributeModal req={req} engine={engine} />;
+function PendingModal({ state, myId, sendAction }) {
+  const req = state && state.pendingRequest;
+  if (!req || req.ownerId !== myId) return null; // 내 모달일 때만 표시
+  if (req.kind === "defense") return <DefenseModal req={req} sendAction={sendAction} />;
+  if (req.kind === "choice") return <ChoiceModal req={req} sendAction={sendAction} />;
+  if (req.kind === "forcedSale") return <ForcedSaleModal req={req} sendAction={sendAction} />;
+  if (req.kind === "replace") return <ReplaceModal req={req} sendAction={sendAction} />;
+  if (req.kind === "redistribute") return <RedistributeModal req={req} sendAction={sendAction} />;
   return null;
 }
 
@@ -158,7 +158,7 @@ function DisconnectBanner({ names }) {
 }
 
 /* ----- Elimination overlay (player knocked out → spectate) ----- */
-function EliminationOverlay({ engine, survivors, onSpectate }) {
+function EliminationOverlay({ survivors, onSpectate }) {
   return (
     <div className="overlay">
       <div className="modal result-modal">
@@ -168,7 +168,7 @@ function EliminationOverlay({ engine, survivors, onSpectate }) {
         <div className="rule-gold" style={{ margin: "18px 0 10px", fontSize: 12 }}>현재 생존자</div>
         <div className="spectate-survivors">
           {survivors.map((p) => (
-            <span key={p.id} className="badge"><Avatar name={p.name} isBot={p.type !== "player"} size={20} /> {p.name}</span>
+            <span key={p.id} className="badge"><Avatar name={p.name} isBot={p.type === "ai"} size={20} /> {p.name}</span>
           ))}
         </div>
         <div className="m-actions" style={{ justifyContent: "center" }}>
@@ -180,8 +180,9 @@ function EliminationOverlay({ engine, survivors, onSpectate }) {
 }
 
 /* ----- Game over overlay (ranking) ----- */
-function GameOverOverlay({ engine, ranking, playerWon, onRematch, onLobby }) {
-  const meId = engine.player().id;
+function GameOverOverlay({ state, myId, ranking, playerWon, isHost, onRematch, onLobby }) {
+  const meId = myId;
+  const rows = (ranking || []).map((r) => ({ rank: r.rank, participant: state.participants.find((p) => p.id === r.id) }));
   return (
     <div className="overlay">
       <div className="modal result-modal">
@@ -189,10 +190,10 @@ function GameOverOverlay({ engine, ranking, playerWon, onRematch, onLobby }) {
         <div className="result-title">{playerWon ? "최후의 생존자" : "결투 종료"}</div>
         <div className="result-sub">{playerWon ? "당신이 마지막까지 살아남았습니다." : "당신은 탈락했지만 결투는 끝났습니다."}</div>
         <div className="rank-list">
-          {ranking.map(({ rank, participant }) => participant && (
+          {rows.map(({ rank, participant }) => participant && (
             <div key={participant.id} className={"rank-row" + (rank === 1 ? " top" : "") + (participant.id === meId ? " me" : "")}>
               <span className="rk-no">{rank}</span>
-              <Avatar name={participant.name} isBot={participant.type !== "player"} size={26} />
+              <Avatar name={participant.name} isBot={participant.type === "ai"} size={26} />
               <span className="rk-name">{participant.name}{participant.id === meId && <span className="chip">나</span>}</span>
               <span className="rk-tag muted">{ATL[participant.aiType]}</span>
             </div>
@@ -200,7 +201,7 @@ function GameOverOverlay({ engine, ranking, playerWon, onRematch, onLobby }) {
         </div>
         <div className="m-actions" style={{ justifyContent: "center" }}>
           <button className="btn ghost" onClick={onLobby}>로비로</button>
-          <button className="btn gold" onClick={onRematch}>대기실로 · 다시 하기</button>
+          <button className="btn gold" disabled={!isHost} onClick={onRematch}>{isHost ? "대기실로 · 다시 하기" : "방장 대기 중"}</button>
         </div>
       </div>
     </div>

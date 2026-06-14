@@ -68,7 +68,7 @@ function ParticipantCard({ p, selectable, current, online, onSelect }) {
         {!p.alive && <span className="flag eliminated">탈락</span>}
       </div>
       <div className="pcard-head">
-        <Avatar name={p.name} isBot={p.type !== "player"} />
+        <Avatar name={p.name} isBot={p.type === "ai"} />
         <div>
           <div className="nm">{p.name}{p.alive && <span className={"dot " + (offline ? "off" : "on")} />}</div>
           <div className="ai-type">{p.alive ? AI_TYPE_LABEL[p.aiType] : "전투 불능"}</div>
@@ -131,19 +131,19 @@ function HandCard({ card, clickable, sealed, reason, onClick }) {
   );
 }
 
-function ImprintList({ imprints, player, isTurn, engine }) {
+function ImprintList({ imprints, player, isTurn, sendAction }) {
   if (!imprints.length) return <span className="muted">등록된 마법 각인이 없습니다.</span>;
   return (
     <div className="imprint-list">
       {imprints.map((card) => {
-        const usable = isTurn && engine.canPay(player, card.cost);
+        const usable = isTurn && canPayCost(player, card.cost);
         return (
           <div className="imprint-item" key={card.id}>
             <div className="imp-name">{card.name}<span className={"chip em-" + card.emotion} style={{ marginLeft: "auto" }}>{EMOTION_LABEL[card.emotion]}</span></div>
             <div className="imp-sub">MP {card.cost.mp} · {card.text}</div>
             <div className="imprint-actions">
-              <button className="btn sm gold" disabled={!usable} onClick={() => engine.useImprint(card.id)}>사용</button>
-              <button className="btn sm ghost" disabled={!isTurn} onClick={() => engine.releaseImprint(card.id)}>해제</button>
+              <button className="btn sm gold" disabled={!usable} onClick={() => sendAction("useImprint", card.id)}>사용</button>
+              <button className="btn sm ghost" disabled={!isTurn} onClick={() => sendAction("releaseImprint", card.id)}>해제</button>
             </div>
           </div>
         );

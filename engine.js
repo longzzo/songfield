@@ -977,10 +977,15 @@ function logTypeLabel(type) {
   return { attack: "공격", defense: "방어", heal: "회복", trade: "거래", status: "상태", system: "시스템", death: "탈락", victory: "승리", defeat: "패배" }[type] || "로그";
 }
 
+/* 클라이언트(서버 상태 스냅샷)용 순수 헬퍼 — 엔진 인스턴스 없이 사용 */
+function canPayCost(actor, cost) { return actor.hp > cost.hp && actor.mp >= cost.mp && actor.gp >= cost.gp; }
+function cardSealed(card) { return card.sealedTurns > 0; }
+function isMyTurn(state, myId) { return !!state && state.phase === "playerAction" && state.currentActorId === myId && !state.gameOver; }
+
 /* isomorphic export: 브라우저는 window.GE, 서버(Workers/Node)는 module.exports */
 const GE = {
   GameEngine, CARDS, STAT, CATEGORY_LABEL, PATH_LABEL, EMOTION_LABEL, AI_TYPE_LABEL, AI_TYPES, DISEASE_NAME,
-  isProtectionScript, signed, clamp, logTypeLabel,
+  isProtectionScript, signed, clamp, logTypeLabel, canPayCost, cardSealed, isMyTurn,
 };
 if (typeof window !== "undefined") window.GE = GE;
 if (typeof module !== "undefined" && module.exports) module.exports = GE;
