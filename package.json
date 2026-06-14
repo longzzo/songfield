@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "serve": "npx --yes serve@14 . -l 8080",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "test": "node test/engine.test.cjs"
   },
   "devDependencies": {
     "wrangler": "^4.100.0",

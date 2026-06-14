@@ -1,8 +1,7 @@
 /* =========================================================
-  멀티 카드 결투 — useRoom (PartyKit 실시간) · useGame · App
-  Phase 1: 로비/접속/준비/채팅/끊김은 PartyKit 서버로 진짜 멀티.
-  전투는 각 클라이언트의 로컬 엔진에서 "자기 자신" 좌석으로 진행한다.
-  (전투 동기화는 Phase 2에서 서버 권위 엔진으로 전환)
+  멀티 카드 결투 — useRoom (실시간) · App
+  Phase 2: 로비/전투 모두 "서버 권위". 클라는 서버가 보낸 상태(sync)를 받아 렌더하고,
+  입력은 action 메시지로 서버에 보낸다(엔진은 서버 Durable Object 에서 구동).
 ========================================================= */
 const { useState: useA, useEffect: useEA, useRef: useRA, useCallback: useCA } = React;
 const GA = window.GE;
@@ -18,22 +17,26 @@ function whenPartySocketReady(cb) {
   window.addEventListener("partysocket-ready", cb, { once: true });
 }
 
-function useRoom({ onStart, onBackToRoom }) {
+function useRoom() {
   const [room, setRoom] = useA(null);
   const [chat, setChat] = useA([]);
+  const [game, setGame] = useA(null);       // 서버 전투 상태(sync)
+  const [ranking, setRanking] = useA(null);  // gameOver 시 최종 순위 [{rank,id}]
+  const [screen, setScreen] = useA("lobby"); // lobby | room | game
   const selfId = useRA(null);
   const sockRef = useRA(null);
 
   const send = (obj) => { const s = sockRef.current; if (s && s.readyState === 1) s.send(JSON.stringify(obj)); };
 
+  const closeSock = () => { if (sockRef.current) { try { sockRef.current.close(); } catch (e) {} sockRef.current = null; } };
+
   const connect = useCA((code, nickname, count) => {
-    if (sockRef.current) { try { sockRef.current.close(); } catch (e) {} sockRef.current = null; }
-    setRoom(null); setChat([]); selfId.current = null;
+    closeSock();
+    setRoom(null); setChat([]); setGame(null); setRanking(null); selfId.current = null;
 
     whenPartySocketReady(() => {
       const socket = new window.PartySocket({ host: window.PARTYKIT_HOST, party: "card-duel", room: code });
       sockRef.current = socket;
-
       socket.addEventListener("open", () => {
         socket.send(JSON.stringify({ type: "join", nickname, maxPlayers: count }));
       });
@@ -42,105 +45,90 @@ function useRoom({ onStart, onBackToRoom }) {
         if (data.type === "history") { selfId.current = data.selfId; setChat(data.chat || []); }
         else if (data.type === "room") setRoom(data.room);
         else if (data.type === "chat") setChat((c) => [...c, data.message]);
-        else if (data.type === "start") onStart && onStart(data.roster, selfId.current);
-        else if (data.type === "backToRoom") onBackToRoom && onBackToRoom();
+        else if (data.type === "sync") { setGame(data.state); setRanking(data.ranking || null); }
+        else if (data.type === "start") setScreen("game");
+        else if (data.type === "backToRoom") { setGame(null); setRanking(null); setScreen("room"); }
       });
     });
-  }, [onStart, onBackToRoom]);
+  }, []);
 
-  const createRoom = (nickname, count) => connect(genCode(), nickname, count);
-  const joinRoom = (code, nickname, count) => connect((code || genCode()).slice(0, 6).toUpperCase(), nickname, count);
+  const createRoom = (nickname, count) => { connect(genCode(), nickname, count); setScreen("room"); };
+  const joinRoom = (code, nickname, count) => { connect((code || genCode()).slice(0, 6).toUpperCase(), nickname, count); setScreen("room"); };
   const toggleReady = () => send({ type: "ready" });
   const setMax = (value) => send({ type: "setMax", value });
+  const addBot = () => send({ type: "addBot" });
+  const removeBot = (id) => send({ type: "removeBot", id });
   const requestStart = () => send({ type: "start" });
   const requestBackToRoom = () => send({ type: "backToRoom" });
   const sendChat = (text) => send({ type: "chat", text });
-  const leaveRoom = () => {
-    if (sockRef.current) { try { sockRef.current.close(); } catch (e) {} sockRef.current = null; }
-    setRoom(null); setChat([]); selfId.current = null;
-  };
+  const sendAction = (action, ...args) => send({ type: "action", action, args });
+  const leaveRoom = () => { closeSock(); setRoom(null); setChat([]); setGame(null); setRanking(null); selfId.current = null; setScreen("lobby"); };
 
-  useEA(() => () => { if (sockRef.current) { try { sockRef.current.close(); } catch (e) {} } }, []);
+  useEA(() => () => closeSock(), []);
 
   const me = room && selfId.current ? room.players.find((p) => p.id === selfId.current) : null;
-  return { room, chat, me, selfId: selfId.current, createRoom, joinRoom, toggleReady, setMax, requestStart, requestBackToRoom, sendChat, leaveRoom };
-}
-
-function useGame() {
-  const ref = useRA(null);
-  if (!ref.current) ref.current = new GA.GameEngine();
-  const [, force] = useA(0);
-  useEA(() => ref.current.subscribe(() => force((v) => v + 1)), []);
-  return ref.current;
-}
-
-/* 서버 roster 를 로컬 엔진용으로 변환:
-   - 내 좌석을 index 0(플레이어)으로 이동
-   - 나머지는 모두 AI. aiType 이 "human"(다른 사람) 이면 로컬 시뮬레이션용 AI 타입 부여 */
-function buildLocalRoster(roster, myId) {
-  const aiTypes = GA.AI_TYPES;
-  const mine = roster.find((r) => r.id === myId);
-  const others = roster.filter((r) => r.id !== myId);
-  const ordered = (mine ? [mine] : []).concat(others);
-  return ordered.map((r, i) => {
-    if (i === 0) return { ...r, aiType: "human" };
-    const aiType = (!r.aiType || r.aiType === "human") ? aiTypes[i % aiTypes.length] : r.aiType;
-    return { ...r, aiType };
-  });
+  return {
+    screen, room, chat, game, ranking, me, myId: selfId.current,
+    createRoom, joinRoom, toggleReady, setMax, addBot, removeBot,
+    requestStart, requestBackToRoom, sendChat, sendAction, leaveRoom,
+  };
 }
 
 function App() {
-  const engine = useGame();
-  const [screen, setScreen] = useA("lobby");
+  const r = useRoom();
   const [nickname, setNickname] = useA("결투자");
   const [playerCount, setPlayerCount] = useA(8);
   const [spectateAck, setSpectateAck] = useA(false);
 
-  const onStart = useCA((roster, myId) => {
-    setSpectateAck(false);
-    engine.newGame(buildLocalRoster(roster, myId));
-    setScreen("game");
-  }, [engine]);
-  const onBackToRoom = useCA(() => { setSpectateAck(false); setScreen("room"); }, []);
+  const st = r.game;
+  const meP = st ? st.participants.find((p) => p.id === r.myId) : null;
+  const isHost = !!(r.room && r.room.hostId === r.myId);
 
-  const roomApi = useRoom({ onStart, onBackToRoom });
+  // 새 게임이 시작되면 관전 확인 초기화
+  useEA(() => { if (st && !st.gameOver && meP && meP.alive) setSpectateAck(false); }, [st && st.gameId]);
+  useEA(() => { window.__cardDuel = { room: r }; }, [r.game]);
 
-  const create = (nick, count) => { roomApi.createRoom(nick, count); setScreen("room"); };
-  const join = (code, nick, count) => { roomApi.joinRoom(code, nick, count); setScreen("room"); };
-  const start = () => roomApi.requestStart();          // 서버가 start 브로드캐스트 → onStart 에서 전환
-  const rematch = () => roomApi.requestBackToRoom();   // 방장이 대기실로 (서버가 전원 전환)
-  const toLobby = () => { roomApi.leaveRoom(); setScreen("lobby"); };
+  const create = (nick, count) => r.createRoom(nick, count);
+  const join = (code, nick, count) => r.joinRoom(code, nick, count);
+  const toLobby = () => r.leaveRoom();
 
-  const st = engine.state;
-  useEA(() => { window.__cardDuel = { engine, room: roomApi }; }, [engine, st]);
   const onlineById = {};
-  if (roomApi.room) roomApi.room.players.forEach((p) => { onlineById[p.id] = p.isOnline; });
-  const offlineNames = (screen === "game" && st && roomApi.room)
-    ? roomApi.room.players.filter((p) => !p.isOnline).filter((p) => { const ep = engine.getParticipant(p.id); return ep && ep.alive; }).map((p) => p.nickname)
+  if (r.room) r.room.players.forEach((p) => { onlineById[p.id] = p.isOnline; });
+  const offlineNames = (r.screen === "game" && st && r.room)
+    ? r.room.players.filter((p) => !p.isOnline)
+        .filter((p) => { const ep = st.participants.find((x) => x.id === p.id); return ep && ep.alive; })
+        .map((p) => p.nickname)
     : [];
+  const survivors = st ? st.participants.filter((p) => p.alive) : [];
+  const spectating = !!(meP && meP.alive === false);
 
   return (
     <div className="app-shell">
-      {screen === "lobby" && (
+      {r.screen === "lobby" && (
         <LobbyScreen nickname={nickname} setNickname={setNickname} playerCount={playerCount} setPlayerCount={setPlayerCount} onCreate={create} onJoin={join} />
       )}
-      {screen === "room" && roomApi.room && (
-        <RoomScreen room={roomApi.room} chat={roomApi.chat} me={roomApi.me}
-          onToggleReady={roomApi.toggleReady} onSetMax={roomApi.setMax} onStart={start} onSend={roomApi.sendChat} onLeave={toLobby} />
+      {r.screen === "room" && r.room && (
+        <RoomScreen room={r.room} chat={r.chat} me={r.me}
+          onToggleReady={r.toggleReady} onSetMax={r.setMax}
+          onAddBot={r.addBot} onRemoveBot={r.removeBot}
+          onStart={r.requestStart} onSend={r.sendChat} onLeave={toLobby} />
       )}
-      {screen === "room" && !roomApi.room && (
+      {r.screen === "room" && !r.room && (
         <div className="center-stage"><div className="parchment-card"><div className="title-xl">연결 중…</div><div className="subtitle">방에 접속하고 있습니다.</div></div></div>
       )}
-      {screen === "game" && st && (
+      {r.screen === "game" && st && (
         <>
-          <GameScreen engine={engine} onlineById={onlineById} offlineNames={offlineNames} />
+          <GameScreen state={st} myId={r.myId} sendAction={r.sendAction} onlineById={onlineById} offlineNames={offlineNames} />
           {st.gameOver && (
-            <GameOverOverlay engine={engine} ranking={engine.finalRanking()} playerWon={st.winnerId === engine.player().id} onRematch={rematch} onLobby={toLobby} />
+            <GameOverOverlay state={st} myId={r.myId} ranking={r.ranking} playerWon={st.winnerId === r.myId} isHost={isHost} onRematch={r.requestBackToRoom} onLobby={toLobby} />
           )}
-          {!st.gameOver && st.playerEliminated && !spectateAck && (
-            <EliminationOverlay engine={engine} survivors={engine.livingParticipants()} onSpectate={() => setSpectateAck(true)} />
+          {!st.gameOver && spectating && !spectateAck && (
+            <EliminationOverlay survivors={survivors} onSpectate={() => setSpectateAck(true)} />
           )}
         </>
+      )}
+      {r.screen === "game" && !st && (
+        <div className="center-stage"><div className="parchment-card"><div className="title-xl">전투 동기화 중…</div><div className="subtitle">서버에서 결투 상태를 받아오고 있습니다.</div></div></div>
       )}
     </div>
   );
