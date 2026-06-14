@@ -2,18 +2,19 @@
   "name": "card-duel",
   "version": "0.1.0",
   "private": true,
-  "description": "멀티 카드 결투 — 실시간 멀티플레이 (PartyKit)",
+  "description": "멀티 카드 결투 — 실시간 멀티플레이 (Cloudflare Workers + partyserver)",
   "scripts": {
-    "dev": "partykit dev",
+    "dev": "wrangler dev",
     "serve": "npx --yes serve@14 . -l 8080",
-    "deploy": "partykit deploy"
+    "deploy": "wrangler deploy"
   },
   "devDependencies": {
-    "partykit": "^0.0.114",
+    "wrangler": "^4.100.0",
     "typescript": "^5.6.3",
     "@cloudflare/workers-types": "^4.20241106.0"
   },
   "dependencies": {
-    "partysocket": "^1.0.2"
+    "partyserver": "^0.5.8",
+    "partysocket": "^1.2.0"
   }
 }

@@ -1,0 +1,17 @@
+{
+  // 멀티 카드 결투 — Cloudflare Workers 배포 설정 (partyserver)
+  // 무료 *.workers.dev 로 `wrangler deploy` 하면 끝.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "card-duel",
+  "main": "party/server.ts",
+  "compatibility_date": "2024-11-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "CardDuel", "class_name": "CardDuel" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["CardDuel"] }
+  ],
+  "observability": { "enabled": true }
+}

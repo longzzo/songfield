@@ -22,17 +22,17 @@
 
   <div id="root"></div>
 
-  <!-- PartyKit 호스트 설정 (Phase 1) -->
+  <!-- 멀티 서버(Cloudflare Workers) 호스트 설정 -->
   <script>
-    // 로컬 개발(127.0.0.1/localhost)에서는 `partykit dev` 서버(:1999)에 붙고,
-    // 그 외(GitHub Pages 등)에서는 배포된 PartyKit 호스트에 붙는다.
+    // 로컬 개발(127.0.0.1/localhost)에서는 `wrangler dev` 서버(:8787)에 붙고,
+    // 그 외(GitHub Pages 등)에서는 배포된 workers.dev 호스트에 붙는다.
     window.PARTYKIT_HOST =
       (location.hostname === "127.0.0.1" || location.hostname === "localhost")
-        ? "127.0.0.1:1999"
-        : "card-duel.YOUR-PARTYKIT-USERNAME.partykit.dev"; // TODO: `npx partykit deploy` 후 실제 호스트로 교체
+        ? "127.0.0.1:8787"
+        : "card-duel.back10092.workers.dev"; // 배포된 Cloudflare Workers 호스트
   </script>
   <script type="module">
-    import { PartySocket } from "https://esm.sh/partysocket@1.0.2";
+    import { PartySocket } from "https://esm.sh/partysocket@1.2.0";
     window.PartySocket = PartySocket;
     window.dispatchEvent(new Event("partysocket-ready"));
   </script>
