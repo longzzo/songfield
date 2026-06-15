@@ -118,7 +118,7 @@ function App() {
       )}
       {r.screen === "game" && st && (
         <>
-          <GameScreen state={st} myId={r.myId} sendAction={r.sendAction} onlineById={onlineById} offlineNames={offlineNames} />
+          <GameScreen state={st} myId={r.myId} sendAction={r.sendAction} onlineById={onlineById} offlineNames={offlineNames} onLeave={toLobby} />
           {st.gameOver && (
             <GameOverOverlay state={st} myId={r.myId} ranking={r.ranking} playerWon={st.winnerId === r.myId} isHost={isHost} onRematch={r.requestBackToRoom} onLobby={toLobby} />
           )}
