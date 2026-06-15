@@ -1104,3 +1104,44 @@ button:disabled { opacity: 0.32; cursor: not-allowed; }
 .cleanse-opt .co-value { color: #c8a850; font-size: 12px; }
 
 .app-shell { overflow-y: auto; }
+
+/* ============================================================
+   카드 가독성 개선 (공격/카테고리·감정 색 구분) + 균열(금역) 강조
+============================================================ */
+/* 카드 표면을 약간 밝히고, 카테고리별 상단 띠로 한눈에 구분 */
+.card { background: #182032; border-color: #2c3850; }
+.card::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px;
+  border-radius: 9px 9px 0 0; background: #3a4860; }
+.card.cat-weapon::before  { background: linear-gradient(90deg,#d05a4a,#8a2e28); }
+.card.cat-armor::before   { background: linear-gradient(90deg,#5a90d0,#244a78); }
+.card.cat-item::before    { background: linear-gradient(90deg,#6cc060,#2e6a28); }
+.card.cat-trade::before   { background: linear-gradient(90deg,#d8a850,#7a5418); }
+.card.cat-miracle::before { background: linear-gradient(90deg,#a888e0,#4a2e80); }
+.card.cat-special::before { background: linear-gradient(90deg,#e0c860,#807018); }
+/* 감정별 은은한 배경 틴트 (가독성 유지) */
+.card.em-rage    { background: #20131040; background: #221512; }
+.card.em-fear    { background: #161228; }
+.card.em-hope    { background: #201a0c; }
+.card.em-calm    { background: #0e1c1c; }
+.card.em-chaos   { background: #1c1020; }
+.card.em-neutral { background: #182032; }
+.card .card-name { color: #f0e8d8; }            /* 이름 더 밝게 */
+.card .card-core { background: #0e1424; color: #f0e8d6; border-color: #2a3850; } /* 효과 박스 밝게 */
+.card.cat-weapon .card-core { color: #ffcdb8; border-color: #5a2e28; }  /* 공격 카드 피해값 또렷하게 */
+
+/* ----- 균열(금역) = 갓필드의 악마 역할: 확실히 티나게 ----- */
+@keyframes riftPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(208,72,160,0.0); } 50% { box-shadow: 0 0 18px 2px rgba(208,72,160,0.35); } }
+.rift-banner { flex-shrink: 0; text-align: center; font-weight: 900; font-size: 12px; letter-spacing: .01em;
+  padding: 6px 10px; border-radius: 8px; border: 1px solid #682048; background: #1a0814; color: #f098c8;
+  animation: riftPulse 1.8s ease-in-out infinite; }
+.rift-banner.sealed { border-color: #2a2438; background: #12101a; color: #6b6080; animation: none; font-weight: 700; }
+.battle-focus.rift-active { border-radius: 9px; }
+.focus-center.phase-rift { border-color: #682048;
+  background: radial-gradient(ellipse at 50% 110%, rgba(160,40,120,0.22), transparent 55%), #18101c; }
+.focus-center.phase-rift .focus-phase { border-color: #b0408c; background: #2a0c20; color: #f0a0d0; }
+.focus-last-log.rift { border-color: #682048; background: #170812; }
+.focus-last-log.rift strong { color: #e070b0; }
+.focus-last-log.rift span { color: #f0b0d8; }
+.log-rift { color: #e070b0; font-weight: 700; }
+.log-rift .log-type { background: #2a0c20; color: #f0a0d0; }
+.badge.badge-rift { border-color: #682048; background: #1a0814; color: #f098c8; }

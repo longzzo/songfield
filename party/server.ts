@@ -83,6 +83,7 @@ export class CardDuel extends Server<Env> {
   hostId: string | null = null;
   status: LobbyStatus = "lobby";
   maxPlayers = 8;
+  riftOpenRound = 8; // 금역(균열) 개방 라운드 — 방장이 대기실에서 조절
   chat: ChatMsg[] = [];
   chatSeq = 1;
   botSeq = 0;
@@ -113,6 +114,7 @@ export class CardDuel extends Server<Env> {
         hostId: this.hostId,
         status: this.status,
         maxPlayers: this.maxPlayers,
+        riftOpenRound: this.riftOpenRound,
       },
     });
     this.broadcast(payload);
@@ -171,7 +173,7 @@ export class CardDuel extends Server<Env> {
     const roster = this.roster().map((p) => ({ id: p.id, nickname: p.nickname, isBot: p.isBot, aiType: p.aiType }));
     this.engine = new GameEngine();
     this.unsub = this.engine.subscribe(() => this.onEngineEmit());
-    this.engine.newGame(roster); // 내부 emit() → onEngineEmit 으로 초기 상태 브로드캐스트
+    this.engine.newGame(roster, { riftOpenRound: this.riftOpenRound }); // 내부 emit() → onEngineEmit 으로 초기 상태 브로드캐스트
   }
   stopGame() {
     if (this.unsub) { this.unsub(); this.unsub = null; }
@@ -306,6 +308,12 @@ export class CardDuel extends Server<Env> {
         v = Math.max(v, this.humans.size); // 사람 수 아래로는 못 내림
         this.maxPlayers = v;
         this.trimBotsToCapacity();
+        this.broadcastRoom();
+        break;
+      }
+      case "setRift": {
+        if (me.id !== this.hostId) break;
+        this.riftOpenRound = Math.min(15, Math.max(1, Math.floor(msg.value)));
         this.broadcastRoom();
         break;
       }

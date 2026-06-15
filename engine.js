@@ -251,9 +251,10 @@ class GameEngine {
   /* =========================================================
     게임 상태 생성  (roster = [{id, nickname, isBot, aiType}])
   ========================================================= */
-  newGame(roster) {
+  newGame(roster, options = {}) {
     this.instanceSeq = 1;
     const gameId = this.gameSeq++;
+    const riftOpenRound = Math.max(1, Math.floor(options.riftOpenRound || RIFT_OPEN_ROUND));
 
     const participants = [];
     roster.forEach((r, i) => {
@@ -269,7 +270,7 @@ class GameEngine {
     this.state = {
       gameId, participants, order, orderIndex: 0, round: 1, phase: "init",
       currentActorId: null, pendingAction: null, pendingRequest: null,
-      gameOver: false, winnerId: null, riftOpened: false,
+      gameOver: false, winnerId: null, riftOpened: false, riftOpenRound,
       eliminationOrder: [], logs: [], logSeq: 1, aiDelay: 650, turnGap: 200,
     };
     this.pendingDefense = null;
@@ -1036,16 +1037,16 @@ class GameEngine {
     return redirected;
   }
   checkRiftOpening() {
-    if (!this.state || this.state.riftOpened || this.state.round < RIFT_OPEN_ROUND) return;
+    if (!this.state || this.state.riftOpened || this.state.round < (this.state.riftOpenRound || RIFT_OPEN_ROUND)) return;
     this.state.riftOpened = true;
-    this.log("금역 개방: 봉인이 약해졌습니다. 이제 카드 획득 시 균열 현상이 발생할 수 있습니다.", "system");
+    this.log("금역 개방: 균열의 악마가 깨어났습니다. 카드를 뽑을 때 균열 현상이 일어날 수 있습니다.", "rift");
   }
   maybeTriggerRiftEvent(actor) {
     if (!this.state || !this.state.riftOpened || this.state.gameOver || !actor?.alive) return false;
     if (actor.mod.preventNextRift) { actor.mod.preventNextRift = false; this.log(`${actor.name}의 금역나침반이 균열 현상을 무효화했습니다.`, "status"); return false; }
     if (Math.random() >= RIFT_EVENT_RATE) return false;
     const event = randomItem(RIFT_EVENTS);
-    this.log(`균열 현상 - ${event.name}: ${event.text}`, "status");
+    this.log(`균열 현상 · ${event.name} — ${event.text}`, "rift");
     this.applyRiftEffect(actor, event.effect);
     this.checkDeaths();
     return true;
@@ -1237,13 +1238,14 @@ function inferLogType(text) {
   if (text.includes("탈락")) return "death";
   if (text.includes("HP -") || text.includes("피해")) return "attack";
   if (text.includes("대응") || text.includes("방어") || text.includes("감소")) return "defense";
+  if (text.includes("금역") || text.includes("균열")) return "rift";
   if (text.includes("HP +") || text.includes("회복")) return "heal";
   if (text.includes("매입") || text.includes("강매") || text.includes("환전") || text.includes("GP")) return "trade";
   if (text.includes("출혈") || text.includes("취약") || text.includes("위축") || text.includes("혼선") || text.includes("질병") || text.includes("봉인") || text.includes("상태")) return "status";
   return "system";
 }
 function logTypeLabel(type) {
-  return { attack: "공격", defense: "방어", heal: "회복", trade: "거래", status: "상태", system: "시스템", death: "탈락", victory: "승리", defeat: "패배" }[type] || "로그";
+  return { attack: "공격", defense: "방어", heal: "회복", trade: "거래", status: "상태", system: "시스템", death: "탈락", victory: "승리", defeat: "패배", rift: "금역" }[type] || "로그";
 }
 
 /* 클라이언트(서버 상태 스냅샷)용 순수 헬퍼 — 엔진 인스턴스 없이 사용 */

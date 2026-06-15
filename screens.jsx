@@ -50,7 +50,7 @@ function LobbyScreen({ nickname, setNickname, playerCount, setPlayerCount, onCre
 }
 
 /* ---------------- Room ---------------- */
-function RoomScreen({ room, chat, me, onToggleReady, onSetMax, onAddBot, onRemoveBot, onStart, onSend, onLeave }) {
+function RoomScreen({ room, chat, me, onToggleReady, onSetMax, onSetRift, onAddBot, onRemoveBot, onStart, onSend, onLeave }) {
   const [draft, setDraft] = useS("");
   const [copied, setCopied] = useS(false);
   const chatRef = useR(null);
@@ -61,6 +61,7 @@ function RoomScreen({ room, chat, me, onToggleReady, onSetMax, onAddBot, onRemov
   const maxPlayers = room.maxPlayers || room.players.length;
   const botCount = room.players.filter((p) => p.isBot).length;
   const isFull = room.players.length >= maxPlayers;
+  const riftRound = room.riftOpenRound || 8;
   const canStart = everyoneReady && room.players.length >= 2;
   const copy = () => { navigator.clipboard?.writeText(room.code).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1400); }).catch(() => {}); };
   const send = () => { const t = draft.trim(); if (!t) return; onSend(t); setDraft(""); };
@@ -115,6 +116,16 @@ function RoomScreen({ room, chat, me, onToggleReady, onSetMax, onAddBot, onRemov
               <div className="host-controls-row" style={{ marginTop: 8 }}>
                 <button className="btn sm block" disabled={isFull} onClick={onAddBot}>봇 추가</button>
                 <button className="btn sm ghost block" disabled={botCount === 0} onClick={() => onRemoveBot()}>봇 제거</button>
+              </div>
+              <div className="host-controls-row" style={{ marginTop: 10 }}>
+                <span className="muted" style={{ fontSize: 12 }}>금역 개방 <b style={{ color: "#e090c0" }}>{riftRound}라운드</b></span>
+                <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+                  <button className="btn sm" disabled={riftRound <= 1} onClick={() => onSetRift(riftRound - 1)}>균열 −</button>
+                  <button className="btn sm" disabled={riftRound >= 15} onClick={() => onSetRift(riftRound + 1)}>균열 +</button>
+                </div>
+              </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 6, lineHeight: 1.4 }}>
+                균열의 악마가 깨어나는 라운드입니다. 빠르게(1~2) 두면 테스트·난전, 늦게 두면 후반 변수.
               </div>
             </div>
           )}
@@ -227,14 +238,17 @@ function GameScreen({ state, myId, sendAction, onlineById, offlineNames, onLeave
         <section className="combat-column">
           <section className="battle-focus-section panel-block">
             <div className="section-head"><h2>전투 상황</h2></div>
-            <div className="battle-focus">
+            <div className={"battle-focus" + (st.riftOpened ? " rift-active" : "")}>
+              {st.riftOpened
+                ? <div className="rift-banner">☄ 금역 개방 · 균열의 악마가 깨어났습니다 — 카드를 뽑을 때 균열 현상 주의</div>
+                : <div className="rift-banner sealed">금역 봉인 중 · {(st.riftOpenRound || 8)}라운드에 균열의 악마가 깨어납니다</div>}
               <div className="focus-stage">
                 <div className="focus-side actor-side">
                   <div className="focus-label">행동</div>
                   <strong>{current ? current.name : "-"}</strong>
                   <em>{current ? AI_TYPE_LABEL[current.aiType] : ""}</em>
                 </div>
-                <div className="focus-center">
+                <div className={"focus-center" + (st.riftOpened ? " phase-rift" : "")}>
                   <div className="focus-phase">{PHASE_LABEL[st.phase] || "진행"}</div>
                   <h3>{focusTitle}</h3>
                   <p>{focusDesc}</p>
@@ -249,7 +263,7 @@ function GameScreen({ state, myId, sendAction, onlineById, offlineNames, onLeave
                 <div className="focus-detail"><span>생존</span><strong>{alive}명</strong></div>
                 <div className="focus-detail"><span>금역</span><strong>{st.riftOpened ? "개방" : "봉인"}</strong></div>
               </div>
-              {lastLog && <div className="focus-last-log"><strong>{logTypeLabel(lastLog.type)}</strong><span>{lastLog.text}</span></div>}
+              {lastLog && <div className={"focus-last-log" + (lastLog.type === "rift" ? " rift" : "")}><strong>{logTypeLabel(lastLog.type)}</strong><span>{lastLog.text}</span></div>}
             </div>
           </section>
 

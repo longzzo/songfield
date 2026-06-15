@@ -56,6 +56,7 @@ function useRoom() {
   const joinRoom = (code, nickname, count) => { connect((code || genCode()).slice(0, 6).toUpperCase(), nickname, count); setScreen("room"); };
   const toggleReady = () => send({ type: "ready" });
   const setMax = (value) => send({ type: "setMax", value });
+  const setRift = (value) => send({ type: "setRift", value });
   const addBot = () => send({ type: "addBot" });
   const removeBot = (id) => send({ type: "removeBot", id });
   const requestStart = () => send({ type: "start" });
@@ -69,7 +70,7 @@ function useRoom() {
   const me = room && selfId.current ? room.players.find((p) => p.id === selfId.current) : null;
   return {
     screen, room, chat, game, ranking, me, myId: selfId.current,
-    createRoom, joinRoom, toggleReady, setMax, addBot, removeBot,
+    createRoom, joinRoom, toggleReady, setMax, setRift, addBot, removeBot,
     requestStart, requestBackToRoom, sendChat, sendAction, leaveRoom,
   };
 }
@@ -109,7 +110,7 @@ function App() {
       )}
       {r.screen === "room" && r.room && (
         <RoomScreen room={r.room} chat={r.chat} me={r.me}
-          onToggleReady={r.toggleReady} onSetMax={r.setMax}
+          onToggleReady={r.toggleReady} onSetMax={r.setMax} onSetRift={r.setRift}
           onAddBot={r.addBot} onRemoveBot={r.removeBot}
           onStart={r.requestStart} onSend={r.sendChat} onLeave={toLobby} />
       )}

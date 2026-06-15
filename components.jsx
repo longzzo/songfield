@@ -103,7 +103,7 @@ function cardEffText(card) {
 }
 
 function HandCard({ card, clickable, sealed, selected, reason, onClick }) {
-  const cls = ["card", "em-" + card.emotion, "emotion-border-" + card.emotion];
+  const cls = ["card", "cat-" + card.category, "em-" + card.emotion, "emotion-border-" + card.emotion];
   if (!clickable) cls.push("disabled");
   if (sealed) cls.push("sealed");
   if (selected) cls.push("current");
