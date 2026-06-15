@@ -20,6 +20,49 @@ const AI_TYPE_LABEL = {
 };
 const AI_TYPES = ["aggressive", "defensive", "alchemist", "trader", "mage", "holy", "vengeful", "opportunist", "chaotic"];
 
+/* ----- 수호 각인 / 균열 (신규 시스템) ----- */
+const GUARDIAN_SIGILS = [
+  { id: "sigil_dawn", name: "새벽의 가호", emotion: "hope", text: "회복과 정화를 번갈아 내리는 수호 각인.", actions: [
+    { weight: 45, effect: "heal_1", text: "HP를 1 회복한다." },
+    { weight: 30, effect: "gain_mp_1", text: "MP를 1 회복한다." },
+    { weight: 25, effect: "remove_minor_status", text: "경증 상태이상 1개를 제거한다." },
+  ] },
+  { id: "sigil_ember", name: "잿불의 가호", emotion: "rage", text: "작은 공격과 전투 충동을 일으키는 수호 각인.", actions: [
+    { weight: 50, effect: "random_enemy_damage_1", text: "무작위 적에게 1 피해를 준다." },
+    { weight: 30, effect: "next_weapon_power_up_1", text: "다음 무기 피해가 1 증가한다." },
+    { weight: 20, effect: "random_enemy_vulnerable", text: "무작위 적에게 취약을 부여한다." },
+  ] },
+  { id: "sigil_stillness", name: "고요의 가호", emotion: "calm", text: "방어와 안정에 치우친 수호 각인.", actions: [
+    { weight: 45, effect: "remove_minor_status", text: "경증 상태이상 1개를 제거한다." },
+    { weight: 35, effect: "next_damage_reduce_1", text: "다음에 받을 피해를 1 줄인다." },
+    { weight: 20, effect: "heal_1", text: "HP를 1 회복한다." },
+  ] },
+  { id: "sigil_rift", name: "균열의 가호", emotion: "chaos", text: "손패와 봉인을 뒤흔드는 불안정한 수호 각인.", actions: [
+    { weight: 45, effect: "replace_one_card", text: "손패 1장을 무작위 교체한다." },
+    { weight: 35, effect: "seal_random_enemy_card", text: "무작위 적의 손패 1장을 봉인한다." },
+    { weight: 20, effect: "gain_gp_1", text: "GP를 1 얻는다." },
+  ] },
+  { id: "sigil_coin", name: "동전의 가호", emotion: "neutral", text: "거래 자원을 보태는 수호 각인.", actions: [
+    { weight: 60, effect: "gain_gp_1", text: "GP를 1 얻는다." },
+    { weight: 25, effect: "gain_gp_2", text: "GP를 2 얻는다." },
+    { weight: 15, effect: "random_enemy_gp_minus_1", text: "무작위 적의 GP를 1 줄인다." },
+  ] },
+  { id: "sigil_tide", name: "잔물결의 가호", emotion: "hope", text: "마력과 체력을 천천히 보충하는 수호 각인.", actions: [
+    { weight: 45, effect: "gain_mp_1", text: "MP를 1 회복한다." },
+    { weight: 35, effect: "heal_1", text: "HP를 1 회복한다." },
+    { weight: 20, effect: "remove_bleeding", text: "출혈을 제거한다." },
+  ] },
+];
+const RIFT_EVENTS = [
+  { id: "rift_wound", name: "균열 상처", effect: "hp_minus_4", text: "금역의 틈에서 날카로운 기운이 새어 나옵니다. HP -4." },
+  { id: "rift_mana_leak", name: "마력 누수", effect: "mp_minus_2", text: "흐트러진 마력이 금역으로 빨려 들어갑니다. MP -2." },
+  { id: "rift_seal_shard", name: "봉인 파편", effect: "seal_card", text: "깨진 봉인의 파편이 손패에 들러붙습니다. 카드 1장 봉인." },
+  { id: "rift_memory_loss", name: "기억 손실", effect: "remove_card", text: "금역의 잡음이 손패 하나를 지워 버립니다. 카드 1장 소실." },
+  { id: "rift_afterglow", name: "잔광", effect: "hp_plus_3", text: "무너진 금역 사이로 희미한 빛이 스며듭니다. HP +3." },
+];
+const RIFT_OPEN_ROUND = 8;
+const RIFT_EVENT_RATE = 0.15;
+
 const PATH_GAIN = {
   weapon: { path: "aura", value: 0.7 }, armor: { path: "aura", value: 0.7 },
   item: { path: "alchemy", value: 1.0 }, trade: { path: "trade", value: 1.2 },
@@ -107,6 +150,18 @@ special_calm_meditation,묵상,special,holy,calm,5,0,0,0,0,0,draw_choice_2_pick_
 special_hope_protection_script,보호문,special,holy,hope,4,0,0,0,0,0,reduce_final_damage_3,4,defense,defense,false,상대 공격 대응 시 사용할 수 있다. 최종 피해를 3 감소시킨다. 방어구로 취급하지 않는다.
 special_neutral_offering_script,봉헌문,special,holy,neutral,6,0,0,0,0,0,sacrifice_1_or_2_draw_plus_1,2,active,self,false,손패를 1~2장 선택해 바친다. 바친 수보다 1장 많은 새 카드를 획득한다.
 special_calm_purification_prayer,정화기도,special,holy,calm,8,0,0,0,0,0,remove_one_status_or_disease_down_1,1,active,self,false,내 상태이상 1개를 제거한다. 질병을 선택하면 질병 단계를 1 낮춘다.
+special_hope_guardian_script,수호문,special,holy,hope,7,0,0,0,0,0,gain_guardian_sigil,1,active,self,false,무작위 수호 각인 1개를 얻는다. 이미 수호 각인이 있으면 새 각인으로 교체한다.
+weapon_rage_splinter_rain,파편비,weapon,aura,rage,6,0,0,0,2,0,area_damage_2_70,1,active,allEnemies,false,모든 적에게 70% 확률로 2 피해를 준다.
+weapon_chaos_rift_burst,균열폭발,weapon,aura,chaos,7,0,0,0,3,0,area_damage_3_55_rift_mark,1,active,allEnemies,false,모든 적에게 55% 확률로 3 피해를 준다. 피해를 주면 균열표식을 부여한다.
+weapon_chaos_mark_dagger,표식 단검,weapon,aura,chaos,4,0,0,0,2,0,rift_mark_on_hit,2,active,enemy,false,대상 1명에게 2 피해를 준다. 피해를 주면 균열표식을 부여한다.
+armor_fear_echo_shield,반향 방패,armor,aura,fear,6,0,0,0,0,4,reflect_weapon_2_if_blocked,1,defense,defense,false,피해를 4 줄인다. 무기 공격을 완전히 막으면 공격자에게 2 피해를 되돌린다.
+armor_calm_moon_ward,월광 결계,armor,aura,calm,6,0,0,0,0,3,magic_guard_bonus_3,1,defense,defense,false,피해를 3 줄인다. 기적 공격을 막을 때 방어값이 3 증가한다.
+armor_chaos_spell_mirror,주문 거울,armor,aura,chaos,7,0,0,0,0,3,reflect_magic_2_if_blocked,1,defense,defense,false,기적 공격에만 대응할 수 있다. 기적 피해를 완전히 막으면 공격자에게 2 피해를 되돌린다.
+armor_hope_sky_canopy,하늘 덮개,armor,aura,hope,5,0,0,0,0,2,area_guard_bonus_3,2,defense,defense,false,피해를 2 줄인다. 광역 공격을 막을 때 방어값이 3 증가한다.
+special_hope_guardian_pact,성약문,special,holy,hope,8,0,0,0,0,0,choose_guardian_sigil_2,1,active,self,false,수호 각인 후보 2개 중 1개를 선택해 얻는다. 이미 수호 각인이 있으면 교체한다.
+special_calm_grace_amplifier,가호 증폭,special,holy,calm,6,0,0,0,0,0,force_guardian_trigger_or_gain,2,active,self,false,수호 각인이 있으면 즉시 1회 발동시킨다. 수호 각인이 없으면 무작위 수호 각인을 얻는다.
+special_calm_forbidden_compass,금역나침반,special,holy,calm,6,0,0,0,0,0,prevent_next_rift_event,2,active,self,false,다음에 내가 받을 균열 현상 1회를 무효화한다.
+special_chaos_rift_shard,금역의 파편,special,holy,chaos,7,0,0,0,0,0,apply_rift_mark_and_blur_enemy,1,active,enemy,false,대상에게 균열표식과 흐림을 부여한다.
 special_hope_sanctuary_declaration,성역선언,special,holy,hope,6,0,0,0,0,0,prevent_next_status_once,2,active,self,false,다음에 내가 받을 상태이상 부여를 1회 무효화한다. 내 다음 턴 종료 시까지 지속된다.`;
 
 function parseCards(csv) {
@@ -157,7 +212,7 @@ function beats(a, b) {
   );
 }
 function statusLabel(status) {
-  return { bleeding: "출혈", vulnerable: "취약", weakened: "위축", confusion: "혼선" }[status] || status;
+  return { bleeding: "출혈", vulnerable: "취약", weakened: "위축", confusion: "혼선", riftMarked: "균열표식", blurred: "흐림" }[status] || status;
 }
 function isProtectionScript(card) { return card?.effect === "reduce_final_damage_3"; }
 
@@ -214,7 +269,7 @@ class GameEngine {
     this.state = {
       gameId, participants, order, orderIndex: 0, round: 1, phase: "init",
       currentActorId: null, pendingAction: null, pendingRequest: null,
-      gameOver: false, winnerId: null,
+      gameOver: false, winnerId: null, riftOpened: false,
       eliminationOrder: [], logs: [], logSeq: 1, aiDelay: 650, turnGap: 200,
     };
     this.pendingDefense = null;
@@ -230,12 +285,12 @@ class GameEngine {
       id, name, type, aiType,
       hp: STAT.startHp, mp: STAT.startMp, gp: STAT.startGp,
       maxHp: STAT.maxHp, maxMp: STAT.maxMp, maxGp: STAT.maxGp,
-      hand: [], imprints: [], alive: true, recentAttacker: null,
+      hand: [], imprints: [], guardianSigil: null, alive: true, recentAttacker: null,
       primaryPath: null, emotionPath: null,
       pathScores: { aura: 0, alchemy: 0, trade: 0, magic: 0, holy: 0 },
       emotionCounts: { rage: 0, fear: 0, hope: 0, calm: 0, chaos: 0 },
-      statuses: { bleeding: 0, vulnerable: false, weakened: false, confusion: false, disease: 0 },
-      mod: { nextDamageReduce: 0, nextWeaponPowerDelta: 0, preventNextStatus: false },
+      statuses: { bleeding: 0, vulnerable: false, weakened: false, confusion: false, riftMarked: false, blurred: false, disease: 0 },
+      mod: { nextDamageReduce: 0, nextWeaponPowerDelta: 0, preventNextStatus: false, preventNextRift: false },
     };
   }
 
@@ -245,7 +300,7 @@ class GameEngine {
     if (!actor.alive || actor.hand.length >= STAT.maxHand) return null;
     const instance = this.generateCardFor(actor);
     actor.hand.push(instance);
-    if (withLog) this.log(`${actor.name} 카드 획득: ${instance.name}`);
+    if (withLog) { this.log(`${actor.name} 카드 획득: ${instance.name}`); this.maybeTriggerRiftEvent(actor); }
     return instance;
   }
   generateCardFor(actor) {
@@ -270,6 +325,7 @@ class GameEngine {
   beginTurn(expectedGameId = null) {
     if (!this.state || this.state.gameOver) return;
     if (expectedGameId !== null && this.state.gameId !== expectedGameId) return;
+    this.checkRiftOpening();
     const actor = this.getParticipant(this.state.order[this.state.orderIndex]);
     if (!actor) return;
     // 죽은 좌석은 currentActorId 를 찍지 않고 건너뛴다(과도 상태에서 죽은 좌석이
@@ -345,7 +401,8 @@ class GameEngine {
     if (card.effect === "sell_own_card_to_target_by_price" && this.isHuman(actor) && !options.sellInstanceId) { this.openForcedSaleModal(actor, card, targetId); return; }
     if (card.effect === "replace_one_card_self" && this.isHuman(actor) && !options.replaceInstanceId) { this.openReplaceCardModal(actor, card); return; }
 
-    const target = targetId ? this.getParticipant(targetId) : actor;
+    const initialTarget = targetId ? this.getParticipant(targetId) : actor;
+    const target = this.resolveBlurredTarget(actor, initialTarget, card);
     const afterEffect = () => {
       if (!fromImprint) {
         this.removeCardFromHand(actor, card.instanceId);
@@ -362,16 +419,19 @@ class GameEngine {
 
     this.payCost(actor, card.cost);
     this.recordCardUse(actor, card);
-    if (card.category === "weapon") { this.performAttack(actor, target, card, { isMagic: false, onComplete: afterEffect }); return; }
+    if (card.category === "weapon") {
+      if (this.isAreaAttackCard(card)) { this.performAreaAttack(actor, card, { onComplete: afterEffect }); return; }
+      this.performAttack(actor, target, card, { isMagic: false, onComplete: afterEffect }); return;
+    }
     this.applyCardEffect(actor, card, target || actor, options, afterEffect);
   }
 
   performAttack(attacker, defender, card, options = {}) {
     if (!attacker.alive || !defender || !defender.alive) { options.onComplete?.(); return; }
     const damage = this.computeAttackPower(attacker, defender, card, Boolean(options.isMagic));
-    const attackData = { attacker, defender, card, baseDamage: Math.max(0, damage), isMagic: Boolean(options.isMagic), onComplete: options.onComplete };
+    const attackData = { attacker, defender, card, baseDamage: Math.max(0, damage), isMagic: Boolean(options.isMagic), isArea: Boolean(options.isArea), onComplete: options.onComplete };
     if (this.isHuman(defender)) { this.openDefenseModal(attackData); return; }
-    const defenseCard = this.chooseAIDefense(defender, card, damage);
+    const defenseCard = this.chooseAIDefense(defender, attackData);
     this.resolveDefense(attackData, defenseCard, false);
   }
 
@@ -395,7 +455,7 @@ class GameEngine {
     if (defenseCard) {
       usedDefense = defenseCard;
       const protectionScript = isProtectionScript(defenseCard);
-      guard = protectionScript ? 0 : this.computeGuard(defender, defenseCard, card);
+      guard = protectionScript ? 0 : this.computeGuard(defender, defenseCard, card, attackData);
       finalDamageReduction = protectionScript ? 3 : 0;
       statusBlockers = this.buildDefenseStatusBlockers(defenseCard, card, protectionScript);
       this.recordCardUse(defender, defenseCard);
@@ -414,7 +474,7 @@ class GameEngine {
     if (defender.mod.nextDamageReduce > 0) { const reduced = Math.min(finalDamage, defender.mod.nextDamageReduce); finalDamage -= reduced; this.log(`${defender.name}의 피해 감소 보정으로 ${reduced} 감소.`, "defense"); defender.mod.nextDamageReduce = 0; }
     if (defender.statuses.vulnerable && finalDamage > 0) { finalDamage += 2; defender.statuses.vulnerable = false; this.log(`${defender.name}의 취약으로 피해가 2 증가했습니다.`, "status"); }
     this.applyDamage(defender, finalDamage, attacker);
-    if (usedDefense) this.applyDefenseAfterEffect(attacker, defender, usedDefense, finalDamage);
+    if (usedDefense) this.applyDefenseAfterEffect(attacker, defender, usedDefense, finalDamage, attackData);
     if (finalDamage > 0) this.applyHitEffect(attacker, defender, card, { statusBlockers });
     this.checkDeaths();
     this.state.pendingRequest = null;
@@ -422,15 +482,17 @@ class GameEngine {
     onComplete?.();
   }
 
-  computeGuard(defender, defenseCard, attackCard) {
+  computeGuard(defender, defenseCard, attackCard, attackContext = {}) {
     if (isProtectionScript(defenseCard)) return 0;
     let guard = defenseCard.guard;
     if (defenseCard.effect === "low_hp_guard_bonus_2" && defender.hp <= 15) guard += 2;
     if (defenseCard.effect === "random_guard_plus_or_minus_2") guard += Math.random() < 0.5 ? 2 : -2;
+    if (defenseCard.effect === "magic_guard_bonus_3" && attackContext.isMagic) guard += 3;
+    if (defenseCard.effect === "area_guard_bonus_3" && attackContext.isArea) guard += 3;
     guard += this.emotionDefenseModifier(defenseCard.emotion, attackCard.emotion);
     return Math.max(0, guard);
   }
-  defenseMitigationScore(defender, defenseCard, attackCard) { return isProtectionScript(defenseCard) ? 3 : this.computeGuard(defender, defenseCard, attackCard); }
+  defenseMitigationScore(defender, defenseCard, attackData) { return isProtectionScript(defenseCard) ? 3 : this.computeGuard(defender, defenseCard, attackData.card, attackData); }
   buildDefenseStatusBlockers(defenseCard, attackCard, protectionScript) {
     const blockers = new Map();
     if (!defenseCard || protectionScript) return blockers;
@@ -478,7 +540,16 @@ class GameEngine {
       case "apply_confusion_enemy": this.applyStatus(target, "confusion"); break;
       case "draw_choice_2_pick_1": this.drawChoice(actor, done); return;
       case "sacrifice_1_or_2_draw_plus_1": this.offeringScript(actor, card.instanceId); break;
-      case "remove_one_status_or_disease_down_1": if (actor.statuses.disease > 0) this.diseaseDown(actor, 1); else this.removeMinorStatus(actor); break;
+      case "remove_one_status_or_disease_down_1":
+        if (this.isHuman(actor) && !options.cleanseKey) { this.openCleanseStatusModal(actor, done); return; }
+        this.cleanseSelectedStatus(actor, options.cleanseKey); break;
+      case "gain_guardian_sigil": this.grantGuardianSigil(actor); break;
+      case "choose_guardian_sigil_2":
+        if (this.isHuman(actor) && !options.guardianSigilId) { this.openGuardianChoiceModal(actor, done); return; }
+        this.grantGuardianSigil(actor, options.guardianSigilId || null); break;
+      case "force_guardian_trigger_or_gain": if (actor.guardianSigil) this.forceTriggerGuardianSigil(actor); else this.grantGuardianSigil(actor); break;
+      case "prevent_next_rift_event": actor.mod.preventNextRift = true; this.log(`${actor.name}이 다음 균열 현상 1회를 무효화합니다.`, "status"); break;
+      case "apply_rift_mark_and_blur_enemy": this.applyStatus(target, "riftMarked"); this.applyStatus(target, "blurred"); break;
       case "prevent_next_status_once": actor.mod.preventNextStatus = true; this.log(`${actor.name}이 다음 상태이상 1회를 무효화합니다.`); break;
       case "none": default: this.log(`${actor.name}이 ${card.name}을 사용했습니다.`); break;
     }
@@ -495,6 +566,7 @@ class GameEngine {
       case "remove_minor_status_self": this.removeMinorStatus(attacker); break;
       case "next_damage_reduce_1": attacker.mod.nextDamageReduce += 1; this.log(`${attacker.name}의 다음 피해가 1 감소합니다.`, "status"); break;
       case "confusion_50_on_hit": if (Math.random() < 0.5) this.applyHitStatus(defender, "confusion", defenseContext); break;
+      case "rift_mark_on_hit": case "area_damage_3_55_rift_mark": this.applyHitStatus(defender, "riftMarked", defenseContext); break;
       default: break;
     }
   }
@@ -503,9 +575,11 @@ class GameEngine {
     if (blocker) { this.log(`${blocker}이 ${statusLabel(status)} 부여를 막았습니다.`, "defense"); return false; }
     this.applyStatus(defender, status); return true;
   }
-  applyDefenseAfterEffect(attacker, defender, defenseCard, finalDamage) {
+  applyDefenseAfterEffect(attacker, defender, defenseCard, finalDamage, attackData = {}) {
     switch (defenseCard.effect) {
       case "counter_1_if_blocked": if (finalDamage === 0) this.applyDamage(attacker, 1, defender); break;
+      case "reflect_weapon_2_if_blocked": if (finalDamage === 0 && !attackData.isMagic) { this.log(`${defender.name}의 ${defenseCard.name}이 무기 공격을 반사했습니다.`, "defense"); this.applyDamage(attacker, 2, defender); } break;
+      case "reflect_magic_2_if_blocked": if (finalDamage === 0 && attackData.isMagic) { this.log(`${defender.name}의 ${defenseCard.name}이 기적을 되울렸습니다.`, "defense"); this.applyDamage(attacker, 2, defender); } break;
       case "vulnerable_if_blocked": if (finalDamage === 0) this.applyStatus(attacker, "vulnerable"); break;
       case "next_weapon_power_up_1": defender.mod.nextWeaponPowerDelta += 1; this.log(`${defender.name}의 다음 무기 피해가 1 증가합니다.`); break;
       case "enemy_next_weapon_power_down_1": attacker.mod.nextWeaponPowerDelta -= 1; this.log(`${attacker.name}의 다음 무기 피해가 1 감소합니다.`); break;
@@ -515,12 +589,13 @@ class GameEngine {
       default: break;
     }
   }
-  applyDamage(target, amount, source = null) {
+  applyDamage(target, amount, source = null, options = {}) {
     const damage = Math.max(0, Math.floor(amount));
     if (damage <= 0) { this.log(`${target.name}은 피해를 받지 않았습니다.`); return; }
     target.hp -= damage;
     if (source) target.recentAttacker = source.id;
     this.log(`${target.name} HP -${damage}.`);
+    if (!options.ignoreGuardianBreak) this.maybeBreakGuardianSigil(target);
   }
   heal(actor, amount) {
     let value = amount;
@@ -536,6 +611,8 @@ class GameEngine {
     if (status === "vulnerable") target.statuses.vulnerable = true;
     if (status === "weakened") target.statuses.weakened = true;
     if (status === "confusion") target.statuses.confusion = true;
+    if (status === "riftMarked") target.statuses.riftMarked = true;
+    if (status === "blurred") target.statuses.blurred = true;
     this.log(`${target.name}에게 ${statusLabel(status)} 부여.`);
   }
   diseaseUp(target, value) {
@@ -550,6 +627,8 @@ class GameEngine {
     else if (actor.statuses.vulnerable) { actor.statuses.vulnerable = false; this.log(`${actor.name}의 취약이 제거되었습니다.`); }
     else if (actor.statuses.weakened) { actor.statuses.weakened = false; this.log(`${actor.name}의 위축이 제거되었습니다.`); }
     else if (actor.statuses.confusion) { actor.statuses.confusion = false; this.log(`${actor.name}의 혼선이 제거되었습니다.`); }
+    else if (actor.statuses.blurred) { actor.statuses.blurred = false; this.log(`${actor.name}의 흐림이 제거되었습니다.`); }
+    else if (actor.statuses.riftMarked) { actor.statuses.riftMarked = false; this.log(`${actor.name}의 균열표식이 제거되었습니다.`); }
     else { this.log(`${actor.name}에게 제거할 경증 상태가 없습니다.`); }
   }
   removeSealOrConfusion(actor) {
@@ -703,10 +782,11 @@ class GameEngine {
     if (actor.aiType === "vengeful") { const recent = this.getParticipant(actor.recentAttacker); if (recent?.alive && recent.id !== actor.id) return recent; }
     return enemies.sort((a, b) => a.hp - b.hp)[0];
   }
-  chooseAIDefense(defender, attackCard, baseDamage) {
-    const candidates = defender.hand.filter((c) => c.timing === "defense" && !this.isCardSealed(c));
+  chooseAIDefense(defender, attackData) {
+    const baseDamage = attackData.baseDamage;
+    const candidates = defender.hand.filter((c) => c.timing === "defense" && !this.isCardSealed(c) && this.canUseDefenseCardAgainst(c, attackData));
     if (candidates.length === 0) return null;
-    const scored = candidates.map((card) => ({ card, guard: this.defenseMitigationScore(defender, card, attackCard) })).sort((a, b) => b.guard - a.guard);
+    const scored = candidates.map((card) => ({ card, guard: this.defenseMitigationScore(defender, card, attackData) })).sort((a, b) => b.guard - a.guard);
     const best = scored[0];
     if (defender.hp <= 14 || best.guard >= baseDamage * 0.45 || defender.aiType === "defensive") return best.card;
     return null;
@@ -824,13 +904,14 @@ class GameEngine {
   /* ----- 모달 트리거 (pendingRequest.ownerId 로 대상 클라만 표시) ----- */
   openDefenseModal(attackData) {
     const defender = attackData.defender;
-    const defenseCards = defender.hand.filter((c) => c.timing === "defense" && !this.isCardSealed(c));
+    const defenseCards = defender.hand.filter((c) => c.timing === "defense" && !this.isCardSealed(c) && this.canUseDefenseCardAgainst(c, attackData));
     this.state.phase = "defense";
     this.pendingDefense = attackData;
     this.state.pendingRequest = {
       kind: "defense", ownerId: defender.id,
       attackerName: attackData.attacker.name, cardName: attackData.card.name, baseDamage: attackData.baseDamage,
-      defenseCards: defenseCards.map((c) => ({ ...c, _guardValue: isProtectionScript(c) ? "최종 피해 -3" : `방어 ${this.computeGuard(defender, c, attackData.card)}` })),
+      isMagic: !!attackData.isMagic, isArea: !!attackData.isArea,
+      defenseCards: defenseCards.map((c) => ({ ...c, _guardValue: isProtectionScript(c) ? "최종 피해 -3" : `방어 ${this.computeGuard(defender, c, attackData.card, attackData)}` })),
       hasDefense: defenseCards.length > 0,
     };
     this.emit();
@@ -909,6 +990,7 @@ class GameEngine {
     시작 / 유틸
   ========================================================= */
   applyStartTurnEffects(actor) {
+    this.triggerGuardianSigil(actor);
     if (actor.statuses.confusion && actor.hand.length > 0) {
       const card = randomItem(actor.hand);
       this.removeCardFromHand(actor, card.instanceId); this.drawCard(actor);
@@ -935,6 +1017,193 @@ class GameEngine {
     return actor.hand.splice(index, 1)[0];
   }
   payCost(actor, cost) { actor.hp -= cost.hp; actor.mp -= cost.mp; actor.gp -= cost.gp; }
+
+  /* =========================================================
+    신규 시스템: 수호 각인 / 균열 / 흐림 / 광역 공격 / 정화
+  ========================================================= */
+  randomEnemy(actor) {
+    const enemies = this.livingParticipants().filter((p) => p.id !== actor.id);
+    return enemies.length > 0 ? randomItem(enemies) : null;
+  }
+  resolveBlurredTarget(actor, target, card) {
+    if (!actor?.statuses?.blurred || !target || target.id === actor.id || card.targetType !== "enemy") return target;
+    actor.statuses.blurred = false;
+    if (Math.random() >= 0.5) { this.log(`${actor.name}의 흐림이 걷혔지만 대상 선택은 유지되었습니다.`, "status"); return target; }
+    const candidates = this.livingParticipants().filter((p) => p.id !== actor.id);
+    if (candidates.length === 0) return target;
+    const redirected = randomItem(candidates);
+    this.log(`${actor.name}의 흐림으로 ${card.name}의 대상이 ${redirected.name}(으)로 바뀌었습니다.`, "status");
+    return redirected;
+  }
+  checkRiftOpening() {
+    if (!this.state || this.state.riftOpened || this.state.round < RIFT_OPEN_ROUND) return;
+    this.state.riftOpened = true;
+    this.log("금역 개방: 봉인이 약해졌습니다. 이제 카드 획득 시 균열 현상이 발생할 수 있습니다.", "system");
+  }
+  maybeTriggerRiftEvent(actor) {
+    if (!this.state || !this.state.riftOpened || this.state.gameOver || !actor?.alive) return false;
+    if (actor.mod.preventNextRift) { actor.mod.preventNextRift = false; this.log(`${actor.name}의 금역나침반이 균열 현상을 무효화했습니다.`, "status"); return false; }
+    if (Math.random() >= RIFT_EVENT_RATE) return false;
+    const event = randomItem(RIFT_EVENTS);
+    this.log(`균열 현상 - ${event.name}: ${event.text}`, "status");
+    this.applyRiftEffect(actor, event.effect);
+    this.checkDeaths();
+    return true;
+  }
+  applyRiftEffect(actor, effect) {
+    switch (effect) {
+      case "hp_minus_4": this.applyDamage(actor, 4, null, { ignoreGuardianBreak: true }); break;
+      case "mp_minus_2": { const loss = Math.min(actor.mp, 2); actor.mp -= loss; this.log(`${actor.name} MP -${loss}.`, "status"); break; }
+      case "seal_card": this.sealRandomCard(actor); break;
+      case "remove_card": this.removeRandomCard(actor, "금역의 기억 손실"); break;
+      case "hp_plus_3": this.heal(actor, 3); break;
+    }
+  }
+  removeRandomCard(actor, reason) {
+    if (!actor.hand.length) return;
+    const card = randomItem(actor.hand);
+    this.removeCardFromHand(actor, card.instanceId);
+    this.log(`${actor.name}의 ${card.name}이(가) ${reason}으로 사라졌습니다.`, "status");
+  }
+  grantGuardianSigil(actor, preferredSigilId = null) {
+    const ownedByOthers = new Set(this.livingParticipants().filter((p) => p.id !== actor.id && p.guardianSigil).map((p) => p.guardianSigil.id));
+    const available = GUARDIAN_SIGILS.filter((s) => !ownedByOthers.has(s.id));
+    if (available.length === 0) { this.log("수호 각인 획득 실패: 모든 수호 각인이 다른 서약자에게 묶여 있습니다.", "system"); return false; }
+    const previous = actor.guardianSigil?.name;
+    let sigil = preferredSigilId ? available.find((c) => c.id === preferredSigilId) : null;
+    if (!sigil) sigil = randomItem(available);
+    if (!preferredSigilId && available.length > 1 && actor.guardianSigil) {
+      const nonCurrent = available.filter((c) => c.id !== actor.guardianSigil.id);
+      if (nonCurrent.length > 0) sigil = randomItem(nonCurrent);
+    }
+    actor.guardianSigil = { ...sigil, actions: sigil.actions.map((a) => ({ ...a })) };
+    if (previous) this.log(`${actor.name}의 수호 각인이 ${previous}에서 ${sigil.name}(으)로 교체되었습니다.`, "system");
+    else this.log(`${actor.name}이 ${sigil.name} 수호 각인을 얻었습니다.`, "system");
+    return true;
+  }
+  guardianActionSummary(sigil) { return sigil.actions?.map((a) => a.text).join(" / ") || sigil.text || ""; }
+  pickGuardianAction(sigil) {
+    if (Array.isArray(sigil.actions) && sigil.actions.length > 0) {
+      const table = Object.fromEntries(sigil.actions.map((a, i) => [String(i), a.weight || 1]));
+      return sigil.actions[Number(weightedPick(table))];
+    }
+    return { effect: sigil.effect, text: sigil.text };
+  }
+  forceTriggerGuardianSigil(actor) { if (!actor.guardianSigil) return false; return this.triggerGuardianSigil(actor, true); }
+  triggerGuardianSigil(actor, force = false) {
+    const sigil = actor.guardianSigil;
+    if (!sigil || !actor.alive) return false;
+    if (!force && Math.random() >= 0.25) return false;
+    const action = this.pickGuardianAction(sigil);
+    if (!action) return false;
+    this.log(`${actor.name}의 ${sigil.name} 발동: ${action.text}`, "system");
+    switch (action.effect) {
+      case "heal_1": this.heal(actor, 1); break;
+      case "gain_mp_1": actor.mp = clamp(actor.mp + 1, 0, actor.maxMp); this.log(`${actor.name} MP +1.`, "heal"); break;
+      case "gain_gp_1": actor.gp = clamp(actor.gp + 1, 0, actor.maxGp); this.log(`${actor.name} GP +1.`, "trade"); break;
+      case "gain_gp_2": actor.gp = clamp(actor.gp + 2, 0, actor.maxGp); this.log(`${actor.name} GP +2.`, "trade"); break;
+      case "remove_bleeding": if (actor.statuses.bleeding > 0) { actor.statuses.bleeding = 0; this.log(`${actor.name}의 출혈이 제거되었습니다.`, "status"); } break;
+      case "remove_minor_status": this.removeMinorStatus(actor); break;
+      case "next_damage_reduce_1": actor.mod.nextDamageReduce += 1; this.log(`${actor.name}의 다음 피해가 1 감소합니다.`, "defense"); break;
+      case "next_weapon_power_up_1": actor.mod.nextWeaponPowerDelta += 1; this.log(`${actor.name}의 다음 무기 피해가 1 증가합니다.`, "attack"); break;
+      case "replace_one_card": { if (actor.hand.length === 0) return false; const card = randomItem(actor.hand); this.removeCardFromHand(actor, card.instanceId); this.drawCard(actor); this.log(`${actor.name}의 ${sigil.name}으로 ${card.name}이 교체되었습니다.`, "system"); break; }
+      case "seal_random_enemy_card": { const enemies = this.livingParticipants().filter((p) => p.id !== actor.id && p.hand.length > 0); if (enemies.length === 0) return false; this.sealRandomCard(randomItem(enemies)); break; }
+      case "random_enemy_damage_1": { const t = this.randomEnemy(actor); if (!t) return false; this.applyDamage(t, 1, actor, { ignoreGuardianBreak: true }); break; }
+      case "random_enemy_vulnerable": { const t = this.randomEnemy(actor); if (!t) return false; this.applyStatus(t, "vulnerable"); break; }
+      case "random_enemy_gp_minus_1": { const t = this.randomEnemy(actor); if (!t) return false; const loss = Math.min(t.gp, 1); t.gp -= loss; this.log(`${t.name} GP -${loss}.`, "trade"); break; }
+      default: return false;
+    }
+    return true;
+  }
+  maybeBreakGuardianSigil(actor) {
+    if (!actor?.guardianSigil || !actor.alive) return false;
+    if (Math.random() >= 0.10) return false;
+    const name = actor.guardianSigil.name;
+    actor.guardianSigil = null;
+    this.log(`${actor.name}의 ${name} 수호 각인이 피해 충격으로 흐려졌습니다.`, "status");
+    return true;
+  }
+  isAreaAttackCard(card) { return card?.effect === "area_damage_2_70" || card?.effect === "area_damage_3_55_rift_mark"; }
+  areaHitChance(card) { if (card.effect === "area_damage_2_70") return 0.70; if (card.effect === "area_damage_3_55_rift_mark") return 0.55; return 0; }
+  performAreaAttack(attacker, card, options = {}) {
+    if (!attacker.alive) { options.onComplete?.(); return; }
+    const targets = this.livingParticipants().filter((p) => p.id !== attacker.id);
+    this.log(`${attacker.name}이 ${card.name}으로 광역 공격을 펼칩니다.`, "attack");
+    this.resolveAreaAttackTarget(attacker, card, targets, 0, options.onComplete);
+  }
+  resolveAreaAttackTarget(attacker, card, targets, index, onComplete) {
+    if (!this.state || this.state.gameOver || !attacker.alive || index >= targets.length) { onComplete?.(); return; }
+    const defender = targets[index];
+    const next = () => this.resolveAreaAttackTarget(attacker, card, targets, index + 1, onComplete);
+    if (!defender.alive) { next(); return; }
+    const guaranteed = Boolean(defender.statuses.riftMarked);
+    const hit = guaranteed || Math.random() < this.areaHitChance(card);
+    if (defender.statuses.riftMarked) { defender.statuses.riftMarked = false; this.log(`${defender.name}의 균열표식으로 광역 공격이 반드시 명중합니다.`, "status"); }
+    if (!hit) { this.log(`${card.name}: ${defender.name}에게 빗나갔습니다.`, "attack"); next(); return; }
+    const damage = this.computeAttackPower(attacker, defender, card, false);
+    const attackData = { attacker, defender, card, baseDamage: Math.max(0, damage), isMagic: false, isArea: true, onComplete: next };
+    if (this.isHuman(defender)) { this.openDefenseModal(attackData); return; }
+    const defenseCard = this.chooseAIDefense(defender, attackData);
+    this.resolveDefense(attackData, defenseCard, false);
+  }
+  canUseDefenseCardAgainst(defenseCard, attackData) {
+    if (!defenseCard || defenseCard.timing !== "defense") return false;
+    if (defenseCard.effect === "reflect_magic_2_if_blocked" && !attackData.isMagic) return false;
+    return true;
+  }
+  getCleanseOptions(actor) {
+    const o = [];
+    if (actor.statuses.bleeding > 0) o.push({ key: "bleeding", label: "출혈 제거", value: `출혈 ${actor.statuses.bleeding}턴` });
+    if (actor.statuses.vulnerable) o.push({ key: "vulnerable", label: "취약 제거", value: "다음 피해 +2 방지" });
+    if (actor.statuses.weakened) o.push({ key: "weakened", label: "위축 제거", value: "다음 무기 피해 -2 방지" });
+    if (actor.statuses.confusion) o.push({ key: "confusion", label: "혼선 제거", value: "손패 교체 방지" });
+    if (actor.statuses.blurred) o.push({ key: "blurred", label: "흐림 제거", value: "대상 무작위 변경 방지" });
+    if (actor.statuses.riftMarked) o.push({ key: "riftMarked", label: "균열표식 제거", value: "광역 확정 명중 방지" });
+    if (actor.statuses.disease > 0) o.push({ key: "disease", label: "질병 단계 1 감소", value: DISEASE_NAME[actor.statuses.disease] });
+    return o;
+  }
+  cleanseSelectedStatus(actor, key = null) {
+    const options = this.getCleanseOptions(actor);
+    if (options.length === 0) { this.log(`${actor.name}에게 정화할 상태이상이 없습니다.`, "status"); return; }
+    const target = options.find((o) => o.key === key) || options[0];
+    switch (target.key) {
+      case "bleeding": actor.statuses.bleeding = 0; this.log(`${actor.name}의 출혈이 제거되었습니다.`, "status"); break;
+      case "vulnerable": actor.statuses.vulnerable = false; this.log(`${actor.name}의 취약이 제거되었습니다.`, "status"); break;
+      case "weakened": actor.statuses.weakened = false; this.log(`${actor.name}의 위축이 제거되었습니다.`, "status"); break;
+      case "confusion": actor.statuses.confusion = false; this.log(`${actor.name}의 혼선이 제거되었습니다.`, "status"); break;
+      case "blurred": actor.statuses.blurred = false; this.log(`${actor.name}의 흐림이 제거되었습니다.`, "status"); break;
+      case "riftMarked": actor.statuses.riftMarked = false; this.log(`${actor.name}의 균열표식이 제거되었습니다.`, "status"); break;
+      case "disease": this.diseaseDown(actor, 1); break;
+    }
+  }
+  openGuardianChoiceModal(actor, done) {
+    const ownedByOthers = new Set(this.livingParticipants().filter((p) => p.id !== actor.id && p.guardianSigil).map((p) => p.guardianSigil.id));
+    const available = GUARDIAN_SIGILS.filter((s) => !ownedByOthers.has(s.id));
+    const choices = shuffle(available).slice(0, 2);
+    if (!this.isHuman(actor) || choices.length === 0) { this.grantGuardianSigil(actor); done(); return; }
+    this._guardianCtx = { actor, done };
+    this.state.pendingRequest = { kind: "guardian", ownerId: actor.id, choices: choices.map((s) => ({ id: s.id, name: s.name, emotion: s.emotion, summary: this.guardianActionSummary(s) })) };
+    this.emit();
+  }
+  submitGuardianChoice(actorId, sigilId) {
+    const ctx = this._guardianCtx; if (!ctx || ctx.actor.id !== actorId) return;
+    this._guardianCtx = null; this.state.pendingRequest = null;
+    this.grantGuardianSigil(ctx.actor, sigilId || null);
+    ctx.done();
+  }
+  openCleanseStatusModal(actor, done) {
+    const options = this.getCleanseOptions(actor);
+    if (options.length === 0) { this.cleanseSelectedStatus(actor, null); done(); return; }
+    this._cleanseCtx = { actor, done };
+    this.state.pendingRequest = { kind: "cleanse", ownerId: actor.id, options };
+    this.emit();
+  }
+  submitCleanse(actorId, key) {
+    const ctx = this._cleanseCtx; if (!ctx || ctx.actor.id !== actorId) return;
+    this._cleanseCtx = null; this.state.pendingRequest = null;
+    this.cleanseSelectedStatus(ctx.actor, key);
+    ctx.done();
+  }
 
   checkDeaths() {
     this.state.participants.forEach((p) => {

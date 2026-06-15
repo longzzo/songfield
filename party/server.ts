@@ -24,7 +24,7 @@ const ACTION_WHITELIST = new Set([
   "playCard", "selectTarget", "cancelTarget", "useImprint", "releaseImprint",
   "pray", "startOffer", "cancelOffer", "skipTurn",
   "chooseDefense", "forgive", "submitChoice", "submitForcedSale", "submitReplace",
-  "submitRedistribute", "cancelRedistribute",
+  "submitRedistribute", "cancelRedistribute", "submitGuardianChoice", "submitCleanse",
 ]);
 const TURN_TIMEOUT_MS = 35000;        // 온라인 사람의 행동 제한
 const OFFLINE_TIMEOUT_MS = 1500;      // 끊긴 좌석은 빨리 자동 처리
@@ -231,6 +231,8 @@ export class CardDuel extends Server<Env> {
       else if (req.kind === "forcedSale") this.engine.submitForcedSale(activeId, req.candidates[0].instanceId);
       else if (req.kind === "replace") this.engine.submitReplace(activeId, req.candidates[0].instanceId);
       else if (req.kind === "redistribute") this.engine.cancelRedistribute(activeId);
+      else if (req.kind === "guardian") this.engine.submitGuardianChoice(activeId, req.choices[0].id);
+      else if (req.kind === "cleanse") this.engine.submitCleanse(activeId, req.options[0].key);
     } else if (st.phase === "playerAction" && st.currentActorId === activeId) {
       this.engine.playerTimeout(activeId);
     }
